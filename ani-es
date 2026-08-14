@@ -1,11 +1,11 @@
 #!/bin/bash
 
-VERSION="1.3.5"
+VERSION="1.4.0"
 
 CONTINUE=0
 progress="00:00:00"
 
-# Text colors
+# Colores de texto
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -17,20 +17,20 @@ NC='\033[0m'
 
 show_help() {
     echo ""
-    echo "    Uso: ani-es [opciones] [busqueda]"
+    echo "    Uso: anime [opciones] [busqueda]"
     echo ""
     echo "    Opciones:"
-    echo "      -h, --help       Mostrar ayuda"
-    echo "      -v, --version    Mostrar versión"
-    echo "      -c, --continue   Continua el anime en donde ultimo lo dejaste"
+    echo "      -h, --help       Mostrar esta ayuda"
+    echo "      -v, --version    Mostrar versión instalada"
+    echo "      -c, --continue   Continuar el anime en el último capítulo y minuto visto"
     echo ""
 }
 
 show_version() {
-    echo -e "ani-es ${PURPLE}v${VERSION}${NC}"
+    echo -e "Anime-CMD ${PURPLE}v${VERSION}${NC}"
 }
 
-# parseo de argumentos
+# Parseo de argumentos
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
@@ -167,11 +167,11 @@ except Exception:
     print("1|Serie")
     sys.exit(0)
 
-# Check tipo (Pelicula vs Serie)
+# Verificar tipo (Película vs Serie)
 tipo_m = re.search(r'<span>Tipo:</span>\s*([^<]+)', html, re.I)
 tipo = tipo_m.group(1).strip() if tipo_m else "Serie"
 
-# Get anime_id
+# Obtener anime_id
 m_id = re.search(r'ajax/episodes/(\d+)/', html)
 if m_id:
     anime_id = m_id.group(1)
@@ -195,7 +195,7 @@ if m_id:
     except Exception:
         pass
 
-# Fallback: check highest episode link
+# Fallback: verificar el enlace con número de episodio más alto
 ep_nums = [int(n) for n in re.findall(r'href=[\"\']' + re.escape(anime_url) + r'(\d+)/?[\"\']', html)]
 total = max(ep_nums) if ep_nums else 1
 print(f"{total}|{tipo}")
@@ -216,8 +216,49 @@ try:
 except Exception:
     sys.exit(1)
 
-player_urls = re.findall(r'src=["\'](https://jkanime\.net/jkplayer/[^"\']+)["\']', html)
+# PRIORIDAD 1: Buscar servidores con Audio Latino (lang == 3)
+m_servers = re.search(r'var servers = (\[.*?\]);', html, re.DOTALL)
+if m_servers:
+    try:
+        servers_json = json.loads(m_servers.group(1))
+        # Filtrar servidores en Audio Latino (lang = 3)
+        latino_servers = [s for s in servers_json if str(s.get('lang')) == '3']
+        target_servers = latino_servers if latino_servers else servers_json
 
+        for s in target_servers:
+            remote_b64 = s.get('remote', '')
+            if remote_b64:
+                try:
+                    decoded_url = base64.b64decode(remote_b64).decode('utf-8').strip()
+                    # Enlace directo de Mediafire
+                    if "mediafire.com" in decoded_url.lower():
+                        mf_req = urllib.request.Request(decoded_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        mf_html = urllib.request.urlopen(mf_req).read().decode('utf-8', errors='ignore')
+                        mf_m = re.search(r'href=[\"\'](https://download[^\'\"]+)[\"\']', mf_html)
+                        if mf_m:
+                            print(mf_m.group(1))
+                            sys.exit(0)
+                    
+                    # Enlace directo de Mp4upload
+                    if "mp4upload.com" in decoded_url.lower():
+                        mp4_req = urllib.request.Request(decoded_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        mp4_html = urllib.request.urlopen(mp4_req).read().decode('utf-8', errors='ignore')
+                        src_m = re.search(r'src:\s*[\"\'](https://[^\'\"]+\.mp4)[\"\']', mp4_html)
+                        if src_m:
+                            print(src_m.group(1))
+                            sys.exit(0)
+
+                    # Servidores de streaming compatibles directamente con MPV
+                    if any(k in decoded_url for k in ["voe.sx", "streamwish", "vidhide", "streamtape", "mega.nz", "d-s.io"]):
+                        print(decoded_url)
+                        sys.exit(0)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+# PRIORIDAD 2: Reproductores HLS integrados (jkplayer)
+player_urls = re.findall(r'src=["\'](https://jkanime\.net/jkplayer/[^"\']+)["\']', html)
 for p_url in player_urls:
     p_req = urllib.request.Request(p_url, headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -238,27 +279,6 @@ for p_url in player_urls:
             sys.exit(0)
     except Exception:
         pass
-
-m_servers = re.search(r'var servers = (\[.*?\]);', html, re.DOTALL)
-if m_servers:
-    try:
-        servers_json = json.loads(m_servers.group(1))
-        for s in servers_json:
-            remote_b64 = s.get('remote', '')
-            if remote_b64:
-                try:
-                    decoded_url = base64.b64decode(remote_b64).decode('utf-8')
-                    if "mediafire" in decoded_url.lower():
-                        mf_req = urllib.request.Request(decoded_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        mf_html = urllib.request.urlopen(mf_req).read().decode('utf-8', errors='ignore')
-                        mf_m = re.search(r'href=[\"\'](https://download[^\'\"]+)[\"\']', mf_html)
-                        if mf_m:
-                            print(mf_m.group(1))
-                            sys.exit(0)
-                except Exception:
-                    pass
-    except Exception:
-        pass
 END_STREAM
 }
 
@@ -268,7 +288,7 @@ main() {
 
     local search_term="$arg1"
     if [[ -z "$search_term" ]]; then
-        local prompt_str=$'\001\033[0;32m\002[?] SEARCH ANIME > \001\033[0m\002'
+        local prompt_str=$'\001\033[0;32m\002[?] BUSCAR ANIME > \001\033[0m\002'
         read -r -p "$prompt_str" search_term
         clear
     fi
@@ -277,12 +297,12 @@ main() {
         exit 0
     fi
 
-    echo -e "${CYAN}[~] SEARCHING '${search_term}'...${NC}"
+    echo -e "${CYAN}[~] BUSCANDO '${search_term}'...${NC}"
 
     resultados=$(search_animes "$search_term")
 
     if [[ -z "$resultados" ]]; then
-        echo -e "${RED}[-] No results found for '${search_term}'${NC}"
+        echo -e "${RED}[-] No se encontraron resultados para '${search_term}'${NC}"
         read -p "Presiona ENTER para volver a buscar..." dummy
         arg1=""
         main
@@ -294,11 +314,11 @@ main() {
         opcion="$resultados"
     else
         clear
-        echo -e "${GREEN}[*] SEARCH RESULTS for '${search_term}'${NC}"
-        opcion=$( (echo "$resultados"; echo "Salir|Salir") | tac | fzf --delimiter='\|' --with-nth=1 --prompt="[ SELECT ANIME ] > " --height=~20 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
+        echo -e "${GREEN}[*] RESULTADOS DE BÚSQUEDA para '${search_term}'${NC}"
+        opcion=$( (echo "$resultados"; echo "Salir|Salir") | tac | fzf --delimiter='\|' --with-nth=1 --prompt="[ SELECCIONA UN ANIME ] > " --height=~20 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
     fi
 
-    # Handle ESC or Salir -> Return to search input
+    # Manejo de tecla ESC o Salir -> Volver al buscador
     if [[ -z "$opcion" ]] || [[ "$opcion" == "Salir|Salir" ]] || [[ "$opcion" == "Salir" ]]; then
         arg1=""
         main
@@ -310,7 +330,7 @@ main() {
     titulo_elegido=$(echo "$opcion" | cut -d'|' -f1)
     nuevaurl=$(echo "$opcion" | cut -d'|' -f2)
 
-    echo -e "${CYAN}[~] FETCHING METADATA FOR: ${titulo_elegido}...${NC}"
+    echo -e "${CYAN}[~] OBTENIENDO METADATOS DE: ${titulo_elegido}...${NC}"
 
     meta=$(get_anime_metadata "$nuevaurl")
     num_episodios=$(echo "$meta" | cut -d'|' -f1)
@@ -364,7 +384,7 @@ END
         clear
         echo -e "${GREEN}[+] ANIME: ${titulo_elegido} (${num_episodios} episodios)${NC}"
         capi=$(seq 1 "$num_episodios" | fzf \
-            --prompt="[ SELECT EPISODE ] > " \
+            --prompt="[ SELECCIONA UN EPISODIO ] > " \
             --height=~30 \
             --border=rounded \
             --reverse \
@@ -372,7 +392,7 @@ END
             --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
     fi
 
-    # Handle ESC in episode selection -> Return to main/search
+    # Manejo de tecla ESC al elegir episodio -> Volver a la búsqueda
     if [ -z "$capi" ]; then
         arg1=""
         main
@@ -390,12 +410,12 @@ END
         local ep_url="${nuevaurl%%/}/$ep_num"
 
         clear
-        echo -e "${CYAN}[~] EXTRACTING STREAM FOR EPISODE $ep_num...${NC}"
+        echo -e "${CYAN}[~] OBTENIENDO TRANSMISIÓN (AUDIO LATINO) PARA EL CAPÍTULO $ep_num...${NC}"
 
         src_contenido=$(extract_stream "$ep_url")
 
         if [ -z "$src_contenido" ]; then
-            echo -e "${RED}[-] Could not extract video stream for episode $ep_num.${NC}"
+            echo -e "${RED}[-] No se pudo extraer la transmisión para el capítulo $ep_num.${NC}"
             read -p "Presiona ENTER para continuar..." dummy
             arg1=""
             main
@@ -403,8 +423,8 @@ END
         fi
 
         clear
-        echo -e "${GREEN}[+] LAUNCHING MEDIA PLAYER FOR: ${titulo_elegido} - CAPITULO $ep_num...${NC}"
-        echo -e "${CYAN}[~] Buffering stream... (Close MPV window to exit)${NC}"
+        echo -e "${GREEN}[+] REPRODUCTOR INICIADO: ${titulo_elegido} - CAPÍTULO $ep_num${NC}"
+        echo -e "${CYAN}[~] Cargando transmisión... (Cierra la ventana de MPV para continuar)${NC}"
 
         ENV=$(detect_env)
         pos=0
@@ -412,11 +432,11 @@ END
         case "$ENV" in
             wsl|windows)
                 if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 else
-                    echo -e "${RED}mpv no encontrado en Windows PATH${NC}"
+                    echo -e "${RED}mpv no encontrado en el PATH de Windows${NC}"
                 fi
                 ;;
             termux)
@@ -430,9 +450,9 @@ END
                 ;;
             linux)
                 if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 fi
                 ;;
         esac
@@ -479,7 +499,7 @@ else:
 conect.commit()
 END
 
-        op=$( (echo "Siguiente"; echo "Retroceder"; echo "Atras") | tac | fzf --prompt="[ ACTION ] > " --height=12 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
+        op=$( (echo "Siguiente"; echo "Retroceder"; echo "Atras") | tac | fzf --prompt="[ ACCIÓN ] > " --height=12 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
 
         if [[ "$op" == "Siguiente" ]]; then
             progress="00:00:00"
