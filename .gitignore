@@ -1,0 +1,9 @@
+# Temporary files
+*.tmp
+*.log
+jkanime.net/
+mediafire.com/
+cookies.txt
+history.db
+__pycache__/
+*.pyc
