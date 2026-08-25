@@ -85,6 +85,26 @@ detect_env() {
     fi
 }
 
+find_mpv_cmd() {
+    if command -v mpv >/dev/null 2>&1; then
+        echo "mpv"
+    elif command -v mpv.exe >/dev/null 2>&1; then
+        echo "mpv.exe"
+    elif [ -f "/c/Program Files/mpv/mpv.exe" ]; then
+        echo "/c/Program Files/mpv/mpv.exe"
+    elif [ -f "C:/Program Files/mpv/mpv.exe" ]; then
+        echo "C:/Program Files/mpv/mpv.exe"
+    elif [ -n "$LOCALAPPDATA" ] && [ -f "$LOCALAPPDATA/Microsoft/WinGet/Links/mpv.exe" ]; then
+        echo "$LOCALAPPDATA/Microsoft/WinGet/Links/mpv.exe"
+    elif [ -n "$LOCALAPPDATA" ] && [ -f "$LOCALAPPDATA/Programs/mpv/mpv.exe" ]; then
+        echo "$LOCALAPPDATA/Programs/mpv/mpv.exe"
+    elif [ -n "$USERPROFILE" ] && [ -f "$USERPROFILE/scoop/shims/mpv.exe" ]; then
+        echo "$USERPROFILE/scoop/shims/mpv.exe"
+    else
+        echo ""
+    fi
+}
+
 check_dependencies() {
     local script_name
     script_name=$(basename "$0")
@@ -104,7 +124,9 @@ check_dependencies() {
     local env_type
     env_type=$(detect_env)
     if [ "$env_type" != "termux" ]; then
-        if ! command -v mpv &> /dev/null && ! command -v mpv.exe &> /dev/null; then
+        local mpv_bin
+        mpv_bin=$(find_mpv_cmd)
+        if [ -z "$mpv_bin" ]; then
             missing+=("mpv")
         fi
     fi
@@ -914,12 +936,12 @@ END_CONT
 
         case "$ENV" in
             wsl|windows)
-                if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
-                elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                local mpv_bin
+                mpv_bin=$(find_mpv_cmd)
+                if [ -n "$mpv_bin" ]; then
+                    pos=$("$mpv_bin" --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 else
-                    echo -e "${RED}mpv no encontrado en el PATH de Windows${NC}"
+                    echo -e "${RED}mpv no encontrado en el sistema${NC}"
                 fi
                 ;;
             termux)
@@ -932,10 +954,10 @@ END_CONT
                 fi
                 ;;
             linux)
-                if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
-                elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                local mpv_bin
+                mpv_bin=$(find_mpv_cmd)
+                if [ -n "$mpv_bin" ]; then
+                    pos=$("$mpv_bin" --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 fi
                 ;;
         esac

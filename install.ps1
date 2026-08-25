@@ -46,10 +46,26 @@ if (!(Test-Path $installDir)) {
 Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 2. Verificacion e instalacion de dependencias necesarias (SIN wget, SIN jq)
+# 2. Verificacion e instalacion de dependencias necesarias
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Cyan
+
+# Asegurar que rutas estandar de WinGet y Scoop esten en la sesion actual
+$extraDirs = @(
+    "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
+    "$env:LOCALAPPDATA\Programs\mpv",
+    "C:\Program Files\mpv",
+    "C:\Program Files (x86)\mpv",
+    "$HOME\scoop\shims",
+    "C:\ProgramData\chocolatey\bin"
+)
+
+foreach ($d in $extraDirs) {
+    if ((Test-Path $d) -and ($env:Path -notlike "*$d*")) {
+        $env:Path += ";$d"
+    }
+}
 
 $missingDeps = @()
 
@@ -84,7 +100,13 @@ if (!$hasPython) {
 }
 
 # MPV
-$hasMpv = (Get-Command mpv.exe -ErrorAction SilentlyContinue) -or (Get-Command mpv -ErrorAction SilentlyContinue)
+$hasMpv = (Get-Command mpv.exe -ErrorAction SilentlyContinue) -or `
+          (Get-Command mpv -ErrorAction SilentlyContinue) -or `
+          (Test-Path "$env:LOCALAPPDATA\Microsoft\WinGet\Links\mpv.exe") -or `
+          (Test-Path "$env:LOCALAPPDATA\Programs\mpv\mpv.exe") -or `
+          (Test-Path "C:\Program Files\mpv\mpv.exe") -or `
+          (Test-Path "$HOME\scoop\shims\mpv.exe")
+
 if (!$hasMpv) {
     $missingDeps += "mpv"
     Write-Host "  [!] MPV: NO encontrado" -ForegroundColor Yellow
@@ -93,7 +115,11 @@ if (!$hasMpv) {
 }
 
 # FZF
-$hasFzf = (Get-Command fzf.exe -ErrorAction SilentlyContinue) -or (Get-Command fzf -ErrorAction SilentlyContinue)
+$hasFzf = (Get-Command fzf.exe -ErrorAction SilentlyContinue) -or `
+          (Get-Command fzf -ErrorAction SilentlyContinue) -or `
+          (Test-Path "$env:LOCALAPPDATA\Microsoft\WinGet\Links\fzf.exe") -or `
+          (Test-Path "$HOME\scoop\shims\fzf.exe")
+
 if (!$hasFzf) {
     $missingDeps += "fzf"
     Write-Host "  [!] FZF: NO encontrado" -ForegroundColor Yellow
@@ -173,6 +199,7 @@ try {
 $cmdLines = @(
     "@echo off",
     "setlocal",
+    "set `"PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims;%USERPROFILE%\.anime`"",
     "set `"BASH_PATH=`"",
     "",
     "if exist `"C:\Program Files\Git\bin\bash.exe`" (",
@@ -195,27 +222,28 @@ $cmdLines = @(
 Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 5. Configurar variable de entorno PATH
+# 5. Configurar variable de entorno PATH (incluyendo enlaces WinGet)
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[5/5] Configurando variables de entorno..." -ForegroundColor Cyan
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($null -eq $userPath) {
-    $userPath = ""
+if ($null -eq $userPath) { $userPath = "" }
+
+$pathsToAdd = @($installDir)
+$wingetLinks = "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
+if (Test-Path $wingetLinks) { $pathsToAdd += $wingetLinks }
+
+foreach ($p in $pathsToAdd) {
+    if ($userPath -notlike "*$p*") {
+        $userPath = if ($userPath -eq "") { $p } else { "$userPath;$p" }
+        [Environment]::SetEnvironmentVariable("Path", $userPath, "User")
+        $env:Path += ";$p"
+        Write-Host "  [OK] $p anadido a tu variable PATH." -ForegroundColor Green
+    }
 }
 
-if ($userPath -notlike "*$installDir*") {
-    $newPath = "$userPath;$installDir"
-    if ($userPath -eq "") {
-        $newPath = $installDir
-    }
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    $env:Path += ";$installDir"
-    Write-Host "  [OK] $installDir anadido a tu variable PATH." -ForegroundColor Green
-} else {
-    Write-Host "  [OK] PATH ya configurado correctamente." -ForegroundColor Green
-}
+Write-Host "  [OK] Variables de entorno listas." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
