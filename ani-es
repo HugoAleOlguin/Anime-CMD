@@ -718,7 +718,7 @@ END_STREAM
 # ==============================================================================
 main() {
     clear
-    check_dependencies grep sed
+    check_dependencies
 
     local search_term="$arg1"
     local last_entry=""
@@ -943,40 +943,44 @@ END_CONT
         # Actualizar historial SQLite
         "$PY_CMD" - "$clean_title" "$nuevaurl" "$provider" "$ep_num" "$pos" <<'END_HIST'
 import sys, sqlite3, os
-anime = sys.argv[1]
-url = sys.argv[2]
-provider = sys.argv[3]
-capi = sys.argv[4]
-progress = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "00:00:00"
+try:
+    anime = sys.argv[1]
+    url = sys.argv[2]
+    provider = sys.argv[3]
+    capi = sys.argv[4]
+    progress = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "00:00:00"
 
-home_dir = os.path.expanduser("~")
-db_dir = os.path.join(home_dir, ".anime")
-os.makedirs(db_dir, exist_ok=True)
-db_path = os.path.join(db_dir, "history.db")
+    home_dir = os.path.expanduser("~")
+    db_dir = os.path.join(home_dir, ".anime")
+    os.makedirs(db_dir, exist_ok=True)
+    db_path = os.path.join(db_dir, "history.db")
 
-conect = sqlite3.connect(db_path)
-cursor = conect.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, anime TEXT, url TEXT, provider TEXT, last_cap TEXT, progress TEXT)")
+    conect = sqlite3.connect(db_path)
+    cursor = conect.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, anime TEXT, url TEXT, provider TEXT, last_cap TEXT, progress TEXT)")
 
-cursor.execute("PRAGMA table_info(animes)")
-cols = [col[1] for col in cursor.fetchall()]
-if "url" not in cols:
-    cursor.execute("ALTER TABLE animes ADD COLUMN url TEXT")
-if "provider" not in cols:
-    cursor.execute("ALTER TABLE animes ADD COLUMN provider TEXT")
-if "progress" not in cols:
-    cursor.execute("ALTER TABLE animes ADD COLUMN progress TEXT DEFAULT '00:00:00'")
-conect.commit()
+    cursor.execute("PRAGMA table_info(animes)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if "url" not in cols:
+        cursor.execute("ALTER TABLE animes ADD COLUMN url TEXT")
+    if "provider" not in cols:
+        cursor.execute("ALTER TABLE animes ADD COLUMN provider TEXT")
+    if "progress" not in cols:
+        cursor.execute("ALTER TABLE animes ADD COLUMN progress TEXT DEFAULT '00:00:00'")
+    conect.commit()
 
-cursor.execute('SELECT id FROM animes WHERE anime = ?', (anime,))
-row = cursor.fetchone()
+    cursor.execute('SELECT id FROM animes WHERE anime = ?', (anime,))
+    row = cursor.fetchone()
 
-if row is None:
-    cursor.execute('INSERT INTO animes (anime, url, provider, last_cap, progress) VALUES (?, ?, ?, ?, ?)', (anime, url, provider, capi, progress))
-else:
-    cursor.execute("UPDATE animes SET url = ?, provider = ?, last_cap = ?, progress = ? WHERE anime = ?", (url, provider, capi, progress, anime))
+    if row is None:
+        cursor.execute('INSERT INTO animes (anime, url, provider, last_cap, progress) VALUES (?, ?, ?, ?, ?)', (anime, url, provider, capi, progress))
+    else:
+        cursor.execute("UPDATE animes SET url = ?, provider = ?, last_cap = ?, progress = ? WHERE anime = ?", (url, provider, capi, progress, anime))
 
-conect.commit()
+    conect.commit()
+    conect.close()
+except Exception:
+    pass
 END_HIST
 
         local audio_toggle_label="🇯🇵 Cambiar a Subtitulado"
