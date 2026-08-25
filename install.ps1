@@ -46,28 +46,82 @@ if (!(Test-Path $installDir)) {
 Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 2. Verificacion e instalacion de dependencias necesarias
+# 2. Funciones auxiliares de localizacion de ejecutables
+# ------------------------------------------------------------------------------
+function Find-MpvExe {
+    if (Get-Command mpv.exe -ErrorAction SilentlyContinue) {
+        return (Get-Command mpv.exe).Source
+    }
+    if (Get-Command mpv -ErrorAction SilentlyContinue) {
+        return (Get-Command mpv).Source
+    }
+    
+    $searchLocations = @(
+        "$installDir\mpv.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\mpv.exe",
+        "$env:LOCALAPPDATA\Programs\mpv\mpv.exe",
+        "C:\Program Files\mpv\mpv.exe",
+        "C:\Program Files (x86)\mpv\mpv.exe",
+        "$HOME\scoop\shims\mpv.exe",
+        "$HOME\scoop\apps\mpv\current\mpv.exe",
+        "C:\ProgramData\chocolatey\bin\mpv.exe"
+    )
+    
+    foreach ($loc in $searchLocations) {
+        if (Test-Path $loc) {
+            return $loc
+        }
+    }
+    
+    # Buscar recursivamente en WinGet Packages si existe
+    $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    if (Test-Path $wingetPkg) {
+        $found = Get-ChildItem -Path $wingetPkg -Filter "mpv.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            return $found.FullName
+        }
+    }
+    
+    return $null
+}
+
+function Find-FzfExe {
+    if (Get-Command fzf.exe -ErrorAction SilentlyContinue) {
+        return (Get-Command fzf.exe).Source
+    }
+    if (Get-Command fzf -ErrorAction SilentlyContinue) {
+        return (Get-Command fzf).Source
+    }
+    
+    $searchLocations = @(
+        "$installDir\fzf.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\fzf.exe",
+        "$HOME\scoop\shims\fzf.exe",
+        "C:\ProgramData\chocolatey\bin\fzf.exe"
+    )
+    
+    foreach ($loc in $searchLocations) {
+        if (Test-Path $loc) {
+            return $loc
+        }
+    }
+    
+    $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    if (Test-Path $wingetPkg) {
+        $found = Get-ChildItem -Path $wingetPkg -Filter "fzf.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            return $found.FullName
+        }
+    }
+    
+    return $null
+}
+
+# ------------------------------------------------------------------------------
+# 3. Verificacion e instalacion de dependencias necesarias
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Cyan
-
-# Asegurar que rutas estandar de WinGet y Scoop esten en la sesion actual
-$extraDirs = @(
-    "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
-    "$env:LOCALAPPDATA\Programs\mpv",
-    "C:\Program Files\mpv",
-    "C:\Program Files (x86)\mpv",
-    "$HOME\scoop\shims",
-    "C:\ProgramData\chocolatey\bin"
-)
-
-foreach ($d in $extraDirs) {
-    if ((Test-Path $d) -and ($env:Path -notlike "*$d*")) {
-        $env:Path += ";$d"
-    }
-}
-
-$missingDeps = @()
 
 # Git (Git Bash)
 $gitBash = $null
@@ -82,8 +136,10 @@ if (Test-Path "C:\Program Files\Git\bin\bash.exe") {
 }
 
 if (!$gitBash -and !(Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    $missingDeps += "git"
-    Write-Host "  [!] Git: NO encontrado" -ForegroundColor Yellow
+    Write-Host "  [!] Git: NO encontrado, instalando..." -ForegroundColor Yellow
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent
+    }
 } else {
     Write-Host "  [OK] Git Bash: Presente" -ForegroundColor Green
 }
@@ -93,76 +149,75 @@ $hasPython = (Get-Command python.exe -ErrorAction SilentlyContinue) -or `
              (Get-Command python3.exe -ErrorAction SilentlyContinue) -or `
              (Get-Command py.exe -ErrorAction SilentlyContinue)
 if (!$hasPython) {
-    $missingDeps += "python"
-    Write-Host "  [!] Python: NO encontrado" -ForegroundColor Yellow
+    Write-Host "  [!] Python: NO encontrado, instalando..." -ForegroundColor Yellow
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent
+    }
 } else {
     Write-Host "  [OK] Python: Presente" -ForegroundColor Green
 }
 
 # MPV
-$hasMpv = (Get-Command mpv.exe -ErrorAction SilentlyContinue) -or `
-          (Get-Command mpv -ErrorAction SilentlyContinue) -or `
-          (Test-Path "$env:LOCALAPPDATA\Microsoft\WinGet\Links\mpv.exe") -or `
-          (Test-Path "$env:LOCALAPPDATA\Programs\mpv\mpv.exe") -or `
-          (Test-Path "C:\Program Files\mpv\mpv.exe") -or `
-          (Test-Path "$HOME\scoop\shims\mpv.exe")
-
-if (!$hasMpv) {
-    $missingDeps += "mpv"
-    Write-Host "  [!] MPV: NO encontrado" -ForegroundColor Yellow
-} else {
-    Write-Host "  [OK] MPV: Presente" -ForegroundColor Green
-}
-
-# FZF
-$hasFzf = (Get-Command fzf.exe -ErrorAction SilentlyContinue) -or `
-          (Get-Command fzf -ErrorAction SilentlyContinue) -or `
-          (Test-Path "$env:LOCALAPPDATA\Microsoft\WinGet\Links\fzf.exe") -or `
-          (Test-Path "$HOME\scoop\shims\fzf.exe")
-
-if (!$hasFzf) {
-    $missingDeps += "fzf"
-    Write-Host "  [!] FZF: NO encontrado" -ForegroundColor Yellow
-} else {
-    Write-Host "  [OK] FZF: Presente" -ForegroundColor Green
-}
-
-# Instalacion automatica si falta alguna dependencia
-if ($missingDeps.Count -gt 0) {
-    Write-Host ""
-    Write-Host "[*] Instalando dependencias faltantes automaticamente: $($missingDeps -join ', ')..." -ForegroundColor Yellow
-
+$mpvPath = Find-MpvExe
+if (!$mpvPath) {
+    Write-Host "  [!] MPV: NO encontrado, procediendo a instalar..." -ForegroundColor Yellow
     if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        Write-Host "-> Utilizando Windows Package Manager (WinGet)..." -ForegroundColor Cyan
-        if ($missingDeps -contains "git") {
-            Write-Host "   Instalando Git..." -ForegroundColor Cyan
-            & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        Write-Host "   -> Intentando instalar MPV via WinGet..." -ForegroundColor Cyan
+        & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        $mpvPath = Find-MpvExe
+    }
+    
+    if (!$mpvPath) {
+        Write-Host "   -> Instalando MPV via Scoop..." -ForegroundColor Cyan
+        if (!(Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
         }
-        if ($missingDeps -contains "python") {
-            Write-Host "   Instalando Python..." -ForegroundColor Cyan
-            & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent
-        }
-        if ($missingDeps -contains "mpv") {
-            Write-Host "   Instalando MPV Player..." -ForegroundColor Cyan
-            & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
-        }
-        if ($missingDeps -contains "fzf") {
-            Write-Host "   Instalando FZF..." -ForegroundColor Cyan
-            & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
-        }
-    } elseif (Get-Command scoop.exe -ErrorAction SilentlyContinue) {
-        Write-Host "-> Utilizando Scoop Package Manager..." -ForegroundColor Cyan
-        & scoop install $missingDeps
-    } else {
-        Write-Host "-> Configurando Scoop para instalar dependencias de forma limpia..." -ForegroundColor Cyan
-        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-        Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-        & scoop install $missingDeps
+        & scoop install mpv
+        $mpvPath = Find-MpvExe
     }
 }
 
+if ($mpvPath) {
+    Write-Host "  [OK] MPV: Presente ($mpvPath)" -ForegroundColor Green
+    # Si mpv.exe esta en una subcarpeta o paquete, copiarlo a $installDir para acceso inmediato
+    if ($mpvPath -ne "$installDir\mpv.exe" -and (Test-Path $mpvPath)) {
+        try {
+            $mpvDir = Split-Path $mpvPath -Parent
+            Copy-Item -Path "$mpvDir\*" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+} else {
+    Write-Host "  [!] Advertencia: MPV no pudo ser instalado automaticamente." -ForegroundColor Yellow
+}
+
+# FZF
+$fzfPath = Find-FzfExe
+if (!$fzfPath) {
+    Write-Host "  [!] FZF: NO encontrado, instalando..." -ForegroundColor Yellow
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        $fzfPath = Find-FzfExe
+    }
+    if (!$fzfPath -and (Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
+        & scoop install fzf
+        $fzfPath = Find-FzfExe
+    }
+}
+
+if ($fzfPath) {
+    Write-Host "  [OK] FZF: Presente ($fzfPath)" -ForegroundColor Green
+    if ($fzfPath -ne "$installDir\fzf.exe" -and (Test-Path $fzfPath)) {
+        try {
+            Copy-Item -Path $fzfPath -Destination "$installDir\fzf.exe" -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+} else {
+    Write-Host "  [!] Advertencia: FZF no pudo ser instalado automaticamente." -ForegroundColor Yellow
+}
+
 # ------------------------------------------------------------------------------
-# 3. Instalacion de BeautifulSoup4 en Python
+# 4. Instalacion de BeautifulSoup4 en Python
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[3/5] Configurando librerias de Python..." -ForegroundColor Cyan
@@ -176,7 +231,7 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Descargar la version mas reciente del script principal
+# 5. Descargar la version mas reciente del script principal
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Cyan
@@ -222,7 +277,7 @@ $cmdLines = @(
 Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 5. Configurar variable de entorno PATH (incluyendo enlaces WinGet)
+# 6. Configurar variable de entorno PATH
 # ------------------------------------------------------------------------------
 Write-Host ""
 Write-Host "[5/5] Configurando variables de entorno..." -ForegroundColor Cyan
@@ -233,6 +288,8 @@ if ($null -eq $userPath) { $userPath = "" }
 $pathsToAdd = @($installDir)
 $wingetLinks = "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
 if (Test-Path $wingetLinks) { $pathsToAdd += $wingetLinks }
+$scoopShims = "$HOME\scoop\shims"
+if (Test-Path $scoopShims) { $pathsToAdd += $scoopShims }
 
 foreach ($p in $pathsToAdd) {
     if ($userPath -notlike "*$p*") {
@@ -243,7 +300,7 @@ foreach ($p in $pathsToAdd) {
     }
 }
 
-Write-Host "  [OK] Variables de entorno listas." -ForegroundColor Green
+Write-Host "  [OK] Variables de entorno configuradas correctamente." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
