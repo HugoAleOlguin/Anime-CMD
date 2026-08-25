@@ -236,18 +236,21 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
 Write-Host ""
 Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Cyan
 
+$cacheBust = Get-Random
 $repoUrl = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
+$aniScriptUrl = "$repoUrl/ani-es?v=$cacheBust"
 $aniScriptPath = "$installDir\ani-es"
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri "$repoUrl/ani-es" -OutFile $aniScriptPath -UseBasicParsing
-    Write-Host "  [OK] Script principal descargado con exito." -ForegroundColor Green
+    Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
 } catch {
     Write-Host "  [!] Reintentando descarga con WebClient..." -ForegroundColor Yellow
     $webClient = New-Object System.Net.WebClient
-    $webClient.DownloadFile("$repoUrl/ani-es", $aniScriptPath)
-    Write-Host "  [OK] Script principal descargado con exito." -ForegroundColor Green
+    $webClient.Headers.Add("Cache-Control", "no-cache")
+    $webClient.DownloadFile($aniScriptUrl, $aniScriptPath)
+    Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
 }
 
 # Crear el comando ejecutable anime.cmd

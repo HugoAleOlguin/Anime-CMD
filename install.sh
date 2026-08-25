@@ -44,18 +44,19 @@ fi
 # 3. Descargar el script principal
 echo -e "\033[0;36m[3/4] 📥 Instalando script principal...\033[0m"
 REPO_URL="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
+TIMESTAMP=$(date +%s)
 INSTALL_DIR="/usr/local/bin"
 
 if [ -w "$INSTALL_DIR" ]; then
     rm -f "$INSTALL_DIR/anime" 2>/dev/null || true
-    curl -sL "$REPO_URL/ani-es" -o "$INSTALL_DIR/anime"
+    curl -sL -H "Cache-Control: no-cache" "$REPO_URL/ani-es?v=$TIMESTAMP" -o "$INSTALL_DIR/anime"
     chmod +x "$INSTALL_DIR/anime"
     echo -e "  \033[0;32m[✔] Ejecutable instalado en $INSTALL_DIR/anime\033[0m"
 else
     USER_BIN="$HOME/.local/bin"
     mkdir -p "$USER_BIN"
     rm -f "$USER_BIN/anime" 2>/dev/null || true
-    curl -sL "$REPO_URL/ani-es" -o "$USER_BIN/anime"
+    curl -sL -H "Cache-Control: no-cache" "$REPO_URL/ani-es?v=$TIMESTAMP" -o "$USER_BIN/anime"
     chmod +x "$USER_BIN/anime"
     echo -e "  \033[0;32m[✔] Ejecutable instalado en $USER_BIN/anime\033[0m"
 
