@@ -1,41 +1,53 @@
 <div align="center">
 
-# 🎬 Anime-CMD
+# 🎬 Anime-CMD v2.0
 
-**Herramienta interactiva y ultrarrápida de línea de comandos para buscar, elegir y reproducir anime en español directamente desde tu terminal.**
+**Herramienta interactiva de línea de comandos con motor agregador multi-proveedor para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Plataforma-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20(Termux)-green.svg)]()
 [![Shell](https://img.shields.io/badge/CLI-Bash%20%2B%20Python-orange.svg)]()
+[![Providers](https://img.shields.io/badge/Fuentes-TioAnime%20%7C%20MonosChinos%20%7C%20JKAnime%20%7C%20AnimeFLV-blueviolet.svg)]()
 
 </div>
 
 ---
 
-## ⚡ Características
+## ⚡ Características Principales
 
-- 🔎 **Búsqueda instantánea en memoria:** Motor optimizado que busca y lista títulos sin retrasos ni carpetas temporales pesadas.
-- 🎯 **Menú interactivo con FZF:** Navegación fluida de animes, selección de episodios y opciones posteriores.
-- 📺 **Reproducción directa con MPV:** Carga y reproducción de streams HLS (`.m3u8`) con buffering inteligente.
-- 🕒 **Historial y reanudación automática:** Guarda tu progreso y último capítulo visto en una base de datos local SQLite para continuar cuando quieras (`-c` / `--continue`).
-- ⌨️ **UX intuitiva:** Vuelve atrás en cualquier momento con la tecla <kbd>ESC</kbd> sin cerrar la consola.
-- 💻 **Multiplataforma:** Total compatibilidad con **CMD**, **PowerShell**, **Windows Terminal**, **Git Bash**, **Linux**, **macOS** y **Android (Termux)**.
+- 🌐 **Motor Agregador Multi-Plataforma:** Escaneo concurrente y paralelo en milisegundos a través de las principales bibliotecas de anime:
+  - 🟣 **TioAnime**
+  - 🔵 **MonosChinos**
+  - 🟢 **JKAnime**
+  - 🟠 **AnimeFLV**
+- 🔊 **Prioridad Absoluta en Audio Latino (`[LAT]`):** El algoritmo clasifica automáticamente todas las fuentes priorizando doblaje latino (`[LAT]`), seguido de castellano (`[CAST]`), y con fallback automático a subtitulado en japonés (`[SUB]`).
+- 🏷️ **Etiquetado Visual de Fuente y Audio:** Identifica al instante el proveedor y el tipo de audio en el menú de FZF:
+  ```text
+  [LAT] [TioAnime]     Dragon Ball Super Latino
+  [LAT] [AnimeFLV]     Dragon Ball Super Latino
+  [SUB] [MonosChinos]  Dragon Ball Super
+  [SUB] [JKAnime]      Dragon Ball Super
+  ```
+- 🚀 **Extractor Universal Multi-Servidor:** Resuelve y reproduce automáticamente enlaces directos y streams HLS de **Mediafire**, **YourUpload**, **Mp4upload**, **Voe.sx**, **Streamwish**, **Filemoon**, **JKPlayer (M3U8)**, **Ok.ru**, **Mega** y más con **failover automático** si algún servidor está caído.
+- 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector numérico de episodios y menú contextual post-reproducción (Siguiente capítulo, Retroceder o Cambiar Audio).
+- 🕒 **Historial y Reanudación Inteligente (`-c`):** Guarda tu progreso y último minuto visto en una base de datos local SQLite para continuar exactamente donde lo dejaste.
+- 💻 **Multiplataforma Real:** Compatible con **CMD**, **PowerShell**, **Windows Terminal**, **Git Bash**, **Linux**, **macOS** y **Android (Termux)**.
 
 ---
 
 ## 🚀 Instalación en 1 solo comando
 
-El instalador automático se encarga de descargar el programa y configurar las dependencias necesarias (**MPV**, **FZF**, **Python**, **Git**, etc.).
+El instalador automático descarga el programa y configura todas las dependencias necesarias (**MPV**, **FZF**, **Python**, **Git**).
 
 ### 🪟 Windows (PowerShell)
-Abre PowerShell y pega:
+Abre PowerShell y ejecuta:
 
 ```powershell
 irm https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main/install.ps1 | iex
 ```
 
 ### 🐧 Linux / macOS / WSL / Android (Termux)
-Abre tu terminal y pega:
+Abre tu terminal y ejecuta:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main/install.sh | bash
@@ -46,19 +58,22 @@ curl -sL https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main/install.
 ## 🎮 Modo de uso
 
 ```bash
-# Modo interactivo (te pedirá qué anime deseas ver)
+# Modo interactivo (Búsqueda en todos los servicios, Audio Latino por defecto)
 anime
 
-# Búsqueda directa por título
+# Búsqueda directa
 anime evangelion
+anime dragon ball
 anime naruto shippuden
-anime one piece
 anime jujutsu kaisen
+
+# Forzar versión subtitulada en japonés
+anime shingeki no kyojin -s
 
 # Continuar viendo el último anime donde lo dejaste
 anime -c
 
-# Ver ayuda y versión
+# Ver ayuda y versión instalada
 anime --help
 anime --version
 ```
@@ -72,16 +87,16 @@ anime --version
 | <kbd>Espacio</kbd> | Pausar / Reanudar |
 | <kbd>→</kbd> / <kbd>←</kbd> | Avanzar / Retroceder 5 segundos |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Avanzar / Retroceder 1 minuto |
-| <kbd>f</kbd> | Pantalla completa |
+| <kbd>f</kbd> | Alternar Pantalla Completa |
 | <kbd>9</kbd> / <kbd>0</kbd> | Disminuir / Aumentar volumen |
-| <kbd>q</kbd> | Salir del reproductor y ver opciones del siguiente capítulo |
+| <kbd>q</kbd> | Salir de MPV y abrir menú de acciones (Siguiente / Retroceder / Cambiar Audio) |
 
 ---
 
 ## 📂 Estructura del repositorio
 
 ```text
-├── ani-es        # Script ejecutable principal (Bash + Python)
+├── ani-es        # Script ejecutable principal y motor agregador multi-proveedor
 ├── anime.cmd     # Wrapper ejecutable para Windows CMD/PowerShell
 ├── install.ps1   # Instalador automático para Windows con gestión de dependencias
 ├── install.sh    # Instalador automático para Linux/macOS/Termux

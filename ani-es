@@ -1,11 +1,12 @@
 #!/bin/bash
 
-VERSION="1.4.0"
+VERSION="2.1.0"
 
 CONTINUE=0
+AUDIO_PREF="latino"
 progress="00:00:00"
 
-# Colores de texto
+# Colores de texto ANSI
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -13,21 +14,28 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[0;37m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 show_help() {
     echo ""
-    echo "    Uso: anime [opciones] [busqueda]"
+    echo -e "    ${GREEN}${BOLD}Uso:${NC} anime [opciones] [busqueda]"
     echo ""
-    echo "    Opciones:"
+    echo -e "    ${CYAN}${BOLD}Opciones:${NC}"
+    echo "      -s, --sub        Forzar versión en japonés subtitulada [SUB]"
+    echo "      -c, --continue   Continuar el anime en el último capítulo y minuto visto"
     echo "      -h, --help       Mostrar esta ayuda"
     echo "      -v, --version    Mostrar versión instalada"
-    echo "      -c, --continue   Continuar el anime en el último capítulo y minuto visto"
+    echo ""
+    echo -e "    ${YELLOW}${BOLD}Características del motor v2.1:${NC}"
+    echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (TioAnime, MonosChinos, JKAnime, AnimeFLV)."
+    echo -e "      • ${GREEN}Prioridad Audio Latino:${NC} Reproduce por defecto doblaje latino con failover a subtitulado."
+    echo -e "      • ${GREEN}Detección Inteligente:${NC} Detecta servidores dual-audio y enlaces alternativos de doblaje."
     echo ""
 }
 
 show_version() {
-    echo -e "Anime-CMD ${PURPLE}v${VERSION}${NC}"
+    echo -e "Anime-CMD ${PURPLE}v${VERSION}${NC} - Motor Agregador Multi-Plataforma"
 }
 
 # Parseo de argumentos
@@ -44,6 +52,9 @@ while [[ $# -gt 0 ]]; do
         -c|--continue)
             CONTINUE=1
             ;;
+        -s|--sub)
+            AUDIO_PREF="sub"
+            ;;
         *)
             break
             ;;
@@ -53,13 +64,54 @@ done
 
 arg1="$*"
 
+# Detectar intérprete de Python disponible
+if command -v python3 &> /dev/null; then
+    PY_CMD="python3"
+elif command -v python &> /dev/null; then
+    PY_CMD="python"
+elif command -v py &> /dev/null; then
+    PY_CMD="py"
+else
+    PY_CMD=""
+fi
+
+detect_env() {
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; then
+        echo "wsl"
+    elif [ -n "$PREFIX" ] && [[ "$PREFIX" == *com.termux* ]]; then
+        echo "termux"
+    else
+        echo "linux"
+    fi
+}
+
 check_dependencies() {
     local script_name
     script_name=$(basename "$0")
     local missing=()
 
+    # 1. Verificar Python
+    if [ -z "$PY_CMD" ]; then
+        missing+=("python (o python3)")
+    fi
+
+    # 2. Verificar FZF
+    if ! command -v fzf &> /dev/null && ! command -v fzf.exe &> /dev/null; then
+        missing+=("fzf")
+    fi
+
+    # 3. Verificar MPV (en Termux es opcional)
+    local env_type
+    env_type=$(detect_env)
+    if [ "$env_type" != "termux" ]; then
+        if ! command -v mpv &> /dev/null && ! command -v mpv.exe &> /dev/null; then
+            missing+=("mpv")
+        fi
+    fi
+
+    # 4. Otras utilidades
     for cmd in "$@"; do
-        if ! command -v "$cmd" &> /dev/null; then
+        if ! command -v "$cmd" &> /dev/null && ! command -v "$cmd.exe" &> /dev/null; then
             missing+=("$cmd")
         fi
     done
@@ -74,221 +126,653 @@ check_dependencies() {
     fi
 }
 
-detect_env() {
-    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; then
-        echo "wsl"
-    elif [ -n "$PREFIX" ] && [[ "$PREFIX" == *com.termux* ]]; then
-        echo "termux"
-    else
-        echo "linux"
-    fi
-}
-
+# ==============================================================================
+# MOTOR DE BÚSQUEDA MULTI-PROVEEDOR CONCURRENTE CON FEEDBACK EN TIEMPO REAL
+# ==============================================================================
 search_animes() {
     local search_query="$1"
-    python3 - "$search_query" <<'END_SEARCH'
-import sys, re, urllib.parse, urllib.request
+    local force_sub="$2"
+    "$PY_CMD" - "$search_query" "$force_sub" <<'END_SEARCH'
+import sys, re, urllib.parse, urllib.request, ssl, concurrent.futures
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 try:
     from bs4 import BeautifulSoup
 except ImportError:
     BeautifulSoup = None
 
-query = sys.argv[1]
-encoded_query = urllib.parse.quote(query.replace(' ', '_'))
-url = f"https://jkanime.net/buscar/{encoded_query}/"
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 
-req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-try:
-    html = urllib.request.urlopen(req).read().decode('utf-8', errors='ignore')
-except Exception:
-    sys.exit(0)
-
-ignore_urls = {
-    "https://jkanime.net/directorio/",
-    "https://jkanime.net/horario/",
-    "https://jkanime.net/estrenos/",
-    "https://jkanime.net/top/",
-    "https://jkanime.net/buscar/",
-    "https://jkanime.net/comunidad/",
-    "https://jkanime.net/aplicacion/",
-    "https://jkanime.net/historial/",
-    "https://jkanime.net/guardado/"
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9'
 }
 
-seen = set()
-results = []
+def fetch_html(url, timeout=5):
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx).read().decode('utf-8', errors='ignore')
+    except Exception:
+        return ""
 
-if BeautifulSoup:
-    soup = BeautifulSoup(html, 'html.parser')
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        if re.match(r'^https://jkanime\.net/[a-zA-Z0-9\-]+/$', href):
-            if href in ignore_urls or href in seen or a.find('div'):
-                continue
-            title = a.get_text(" ", strip=True)
-            title = " ".join(title.split())
-            if title and not re.match(r'^\d+\s*/', title):
-                seen.add(href)
-                results.append((title, href))
+def search_tioanime(query):
+    results = []
+    queries = [query]
+    if 'latino' not in query.lower():
+        queries.append(query + ' latino')
+    for q in queries:
+        html = fetch_html('https://tioanime.com/directorio?q=' + urllib.parse.quote(q))
+        if not html: continue
+        if BeautifulSoup:
+            soup = BeautifulSoup(html, 'html.parser')
+            for item in soup.select('.anime article, article.anime, li.anime'):
+                a = item.find('a', href=True)
+                title_el = item.find(['h3', 'h2', 'span'], class_='title')
+                if a and title_el:
+                    title = title_el.get_text(strip=True)
+                    href = 'https://tioanime.com' + a['href']
+                    is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                    is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                    tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                    results.append((tag, '[TioAnime]', title, href, 'tioanime'))
+        else:
+            for m in re.finditer(r'<a\s+href="(/anime/[^"]+)"[^>]*>.*?<h3 class="title">([^<]+)</h3>', html, re.DOTALL):
+                href = 'https://tioanime.com' + m.group(1)
+                title = m.group(2).strip()
+                is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                results.append((tag, '[TioAnime]', title, href, 'tioanime'))
+    return results
+
+def search_monoschinos(query):
+    results = []
+    queries = [query]
+    if 'latino' not in query.lower():
+        queries.append(query + ' latino')
+    for q in queries:
+        html = fetch_html('https://monoschinos2.com/buscar?q=' + urllib.parse.quote(q))
+        if not html: continue
+        if BeautifulSoup:
+            soup = BeautifulSoup(html, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                if '/anime/' in a['href']:
+                    title_tag = a.find(['h3', 'h2', 'h4', 'h5', 'h1', 'p', 'div', 'span'], class_=re.compile(r'title|nombre', re.I))
+                    title = title_tag.get_text(strip=True) if title_tag else a.get_text(strip=True)
+                    href = a['href']
+                    if not href.startswith('http'):
+                        href = 'https://monoschinos.st' + href
+                    is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-audio-latino|-latino', href, re.I))
+                    is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano', href, re.I))
+                    tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                    results.append((tag, '[MonosChinos]', title, href, 'monoschinos'))
+        else:
+            for m in re.finditer(r'<a\s+[^>]*href="(https?://monoschinos\.[^/]+/anime/[^"]+|/anime/[^"]+)"[^>]*>(.*?)</a>', html, re.DOTALL):
+                href = m.group(1)
+                if not href.startswith('http'):
+                    href = 'https://monoschinos.st' + href
+                content = m.group(2)
+                title = re.sub(r'<[^>]+>', '', content).strip()
+                if title:
+                    is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-audio-latino|-latino', href, re.I))
+                    is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano', href, re.I))
+                    tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                    results.append((tag, '[MonosChinos]', title, href, 'monoschinos'))
+    return results
+
+def search_jkanime(query):
+    results = []
+    queries = [query]
+    if 'latino' not in query.lower():
+        queries.append(query + ' latino')
+    ignore_urls = {'https://jkanime.net/directorio/', 'https://jkanime.net/horario/', 'https://jkanime.net/estrenos/', 'https://jkanime.net/top/', 'https://jkanime.net/buscar/', 'https://jkanime.net/comunidad/', 'https://jkanime.net/aplicacion/', 'https://jkanime.net/historial/', 'https://jkanime.net/guardado/'}
+    seen = set()
+    for q in queries:
+        html = fetch_html('https://jkanime.net/buscar/' + urllib.parse.quote(q.replace(' ', '_')) + '/')
+        if not html: continue
+        if BeautifulSoup:
+            soup = BeautifulSoup(html, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if re.match(r'^https://jkanime\.net/[a-zA-Z0-9\-]+/$', href):
+                    if href in ignore_urls or href in seen or a.find('div'):
+                        continue
+                    title = ' '.join(a.get_text(' ', strip=True).split())
+                    if title and not re.match(r'^\d+\s*/', title):
+                        seen.add(href)
+                        is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                        is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                        if not is_lat and not is_cast:
+                            title_clean = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).strip()
+                            if any(k in title_clean for k in ['dragon ball z', 'death note', 'inuyasha', 'ranma', 'sailor moon']):
+                                is_lat = True
+                        tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                        results.append((tag, '[JKAnime]', title, href, 'jkanime'))
+        else:
+            for href, content in re.findall(r'<a[^>]+href=["\'](https://jkanime\.net/[a-zA-Z0-9\-]+/)["\'][^>]*>(.*?)</a>', html, re.DOTALL):
+                if href in ignore_urls or href in seen or '<div' in content:
+                    continue
+                title = re.sub(r'<[^>]+>', '', content).strip()
+                title = ' '.join(title.split())
+                if title and not re.match(r'^\d+\s*/', title):
+                    seen.add(href)
+                    is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                    is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                    if not is_lat and not is_cast:
+                        title_clean = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).strip()
+                        if any(k in title_clean for k in ['dragon ball z', 'death note', 'inuyasha', 'ranma', 'sailor moon']):
+                            is_lat = True
+                    tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                    results.append((tag, '[JKAnime]', title, href, 'jkanime'))
+    return results
+
+def search_animeflv(query):
+    results = []
+    queries = [query]
+    if 'latino' not in query.lower():
+        queries.append(query + ' latino')
+    for q in queries:
+        html = fetch_html('https://www3.animeflv.net/browse?q=' + urllib.parse.quote(q))
+        if not html: continue
+        if BeautifulSoup:
+            soup = BeautifulSoup(html, 'html.parser')
+            for item in soup.select('ul.ListAnimes li article'):
+                a = item.find('a', href=True)
+                title_el = item.find('h3', class_='Title')
+                if a and title_el:
+                    title = title_el.get_text(strip=True)
+                    href = 'https://www3.animeflv.net' + a['href']
+                    is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                    is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                    tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                    results.append((tag, '[AnimeFLV]', title, href, 'animeflv'))
+        else:
+            for href, title in re.findall(r'<a\s+href="(/anime/[^"]+)"[^>]*>.*?<h3 class="Title">([^<]+)</h3>', html, re.DOTALL):
+                href = 'https://www3.animeflv.net' + href
+                is_lat = bool(re.search(r'latino', title, re.I) or re.search(r'-latino/?$', href, re.I))
+                is_cast = bool(re.search(r'castellano', title, re.I) or re.search(r'-castellano/?$', href, re.I))
+                tag = '🔊 [LAT]' if is_lat else ('🇪🇸 [CAST]' if is_cast else '🇯🇵 [SUB]')
+                results.append((tag, '[AnimeFLV]', title.strip(), href, 'animeflv'))
+    return results
+
+query = sys.argv[1]
+force_sub = sys.argv[2] == "sub"
+
+sys.stderr.write(f"\033[0;36m[~] Consultando servidores multi-plataforma para '{query}'...\033[0m\n")
+
+all_results = []
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    futures = {
+        executor.submit(search_tioanime, query): 'TioAnime',
+        executor.submit(search_jkanime, query): 'JKAnime',
+        executor.submit(search_monoschinos, query): 'MonosChinos',
+        executor.submit(search_animeflv, query): 'AnimeFLV',
+    }
+    for future in concurrent.futures.as_completed(futures):
+        prov = futures[future]
+        try:
+            res = future.result()
+            all_results.extend(res)
+            sys.stderr.write(f"  \033[0;32m✔ {prov:<12}\033[0m ({len(res)} títulos)\n")
+        except Exception:
+            sys.stderr.write(f"  \033[0;31m✖ {prov:<12}\033[0m (Error de conexión)\n")
+
+seen_keys = set()
+deduped = []
+for item in all_results:
+    tag, prov, title, href, p_id = item
+    key = (title.lower(), p_id)
+    if key not in seen_keys:
+        seen_keys.add(key)
+        deduped.append(item)
+
+if force_sub:
+    def sort_key(item):
+        tag, prov, title, href, p_id = item
+        prio = 0 if 'SUB' in tag else (1 if 'LAT' in tag else 2)
+        return (prio, title)
 else:
-    pattern = r'<a[^>]+href=["\'](https://jkanime\.net/[a-zA-Z0-9\-]+/)["\'][^>]*>(.*?)</a>'
-    matches = re.findall(pattern, html, re.DOTALL)
-    for href, content in matches:
-        if href in ignore_urls or href in seen or '<div' in content:
-            continue
-        title = re.sub(r'<[^>]+>', '', content).strip()
-        title = " ".join(title.split())
-        if title and not re.match(r'^\d+\s*/', title):
-            seen.add(href)
-            results.append((title, href))
+    def sort_key(item):
+        tag, prov, title, href, p_id = item
+        prio = 0 if 'LAT' in tag else (1 if 'CAST' in tag else 2)
+        return (prio, title)
 
-for title, href in results:
-    print(f"{title}|{href}")
+deduped.sort(key=sort_key)
+lat_count = sum(1 for item in deduped if 'LAT' in item[0])
+sys.stderr.write(f"\033[0;32m[+] Total:\033[0m {len(deduped)} animes encontrados ({lat_count} con Audio Latino 🔊)\n\n")
+
+for tag, prov, title, href, p_id in deduped:
+    print(f"{tag} {prov:<13} {title}|{href}|{p_id}")
 END_SEARCH
 }
 
+# ==============================================================================
+# OBTENCIÓN DE METADATOS Y EPISODIOS
+# ==============================================================================
 get_anime_metadata() {
     local anime_url="$1"
-    python3 - "$anime_url" <<'END_META'
-import sys, re, json, urllib.request, http.cookiejar
+    local provider="$2"
+    "$PY_CMD" - "$anime_url" "$provider" <<'END_META'
+import sys, re, json, urllib.request, http.cookiejar, ssl
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 anime_url = sys.argv[1]
-if not anime_url.endswith('/'):
-    anime_url += '/'
+provider = sys.argv[2] if len(sys.argv) > 2 else "jkanime"
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 
 cj = http.cookiejar.CookieJar()
-opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')]
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj), urllib.request.HTTPSHandler(context=ctx))
+opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')]
 
 try:
-    resp = opener.open(anime_url)
+    resp = opener.open(anime_url, timeout=7)
     html = resp.read().decode('utf-8', errors='ignore')
 except Exception:
-    print("1|Serie")
+    print("1|Serie|{}".format(anime_url))
     sys.exit(0)
 
-# Verificar tipo (Película vs Serie)
-tipo_m = re.search(r'<span>Tipo:</span>\s*([^<]+)', html, re.I)
-tipo = tipo_m.group(1).strip() if tipo_m else "Serie"
+tipo = "Serie"
+total_episodes = 1
 
-# Obtener anime_id
-m_id = re.search(r'ajax/episodes/(\d+)/', html)
-if m_id:
-    anime_id = m_id.group(1)
-    csrf_m = re.search(r'name="csrf-token" content="([^"]+)"', html)
-    csrf_token = csrf_m.group(1) if csrf_m else ""
-    ajax_url = f"https://jkanime.net/ajax/episodes/{anime_id}/1"
-    post_data = f"_token={csrf_token}".encode('utf-8')
-    ajax_req = urllib.request.Request(ajax_url, data=post_data, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-CSRF-TOKEN': csrf_token,
-        'Referer': anime_url
-    })
-    try:
-        ajax_resp = opener.open(ajax_req)
-        data = ajax_resp.read().decode('utf-8', errors='ignore')
-        js = json.loads(data)
-        total = js.get("total", 1)
-        print(f"{total}|{tipo}")
-        sys.exit(0)
-    except Exception:
-        pass
+if provider == 'tioanime':
+    m_ep = re.search(r'var episodes = (\[.*?\]);', html)
+    if m_ep:
+        try:
+            eps = json.loads(m_ep.group(1))
+            total_episodes = max(eps) if eps else 1
+        except Exception:
+            pass
+    if re.search(r'tipo-pelicula|pelicula', html, re.I):
+        tipo = "Pelicula"
 
-# Fallback: verificar el enlace con número de episodio más alto
-ep_nums = [int(n) for n in re.findall(r'href=[\"\']' + re.escape(anime_url) + r'(\d+)/?[\"\']', html)]
-total = max(ep_nums) if ep_nums else 1
-print(f"{total}|{tipo}")
+elif provider == 'animeflv':
+    m_ep = re.search(r'var episodes = (\[\[.*?\]\]);', html)
+    if m_ep:
+        try:
+            eps = json.loads(m_ep.group(1))
+            total_episodes = eps[0][0] if eps else 1
+        except Exception:
+            pass
+    m_tipo = re.search(r'<span>Tipo:</span>\s*([^<]+)', html, re.I)
+    if m_tipo:
+        tipo = m_tipo.group(1).strip()
+
+elif provider == 'jkanime':
+    m_tipo = re.search(r'<span>Tipo:</span>\s*([^<]+)', html, re.I)
+    if m_tipo:
+        tipo = m_tipo.group(1).strip()
+    m_id = re.search(r'ajax/(?:episodes|reportar_trailer|votado)/(\d+)', html)
+    if m_id:
+        try:
+            anime_id = m_id.group(1)
+            csrf_m = re.search(r'name="csrf-token"\s+content="([^"]+)"', html)
+            csrf_token = csrf_m.group(1) if csrf_m else ""
+            ajax_url = "https://jkanime.net/ajax/episodes/{}/1".format(anime_id)
+            post_data = "_token={}".format(csrf_token).encode('utf-8')
+            ajax_req = urllib.request.Request(ajax_url, data=post_data, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrf_token,
+                'Referer': anime_url
+            })
+            ajax_resp = opener.open(ajax_req, timeout=5)
+            data_str = ajax_resp.read().decode('utf-8', errors='ignore')
+            js = json.loads(data_str)
+            total_episodes = js.get("total", 1)
+        except Exception:
+            pass
+    if total_episodes == 1:
+        ep_nums = [int(n) for n in re.findall(r'href=["\']' + re.escape(anime_url.rstrip('/') + '/') + r'(\d+)/?["\']', html)]
+        if ep_nums:
+            total_episodes = max(ep_nums)
+
+elif provider == 'monoschinos':
+    ep_nums = [int(n) for n in re.findall(r'episodio-(\d+)', html)]
+    if ep_nums:
+        total_episodes = max(ep_nums)
+    if re.search(r'pelicula', anime_url, re.I) or re.search(r'pelicula', html, re.I):
+        tipo = "Pelicula"
+
+print("{}|{}|{}".format(total_episodes, tipo, anime_url))
 END_META
 }
 
+# ==============================================================================
+# EXTRACTOR UNIVERSAL DE STREAMS CON FAILOVER INTELIGENTE Y SELECCIÓN DE AUDIO
+# ==============================================================================
 extract_stream() {
-    local episode_url="$1"
-    python3 - "$episode_url" <<'END_STREAM'
-import sys, re, json, base64, urllib.request
+    local anime_url="$1"
+    local provider="$2"
+    local episode_num="$3"
+    local pref_audio="$4"
+    "$PY_CMD" - "$anime_url" "$provider" "$episode_num" "$pref_audio" <<'END_STREAM'
+import sys, re, json, base64, urllib.request, ssl
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-episode_url = sys.argv[1]
-req = urllib.request.Request(episode_url, headers={
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-})
-try:
-    html = urllib.request.urlopen(req).read().decode('utf-8', errors='ignore')
-except Exception:
-    sys.exit(1)
+anime_url = sys.argv[1]
+provider = sys.argv[2] if len(sys.argv) > 2 else "jkanime"
+episode_num = str(sys.argv[3]) if len(sys.argv) > 3 else "1"
+pref_audio = sys.argv[4] if len(sys.argv) > 4 else "latino"
 
-# PRIORIDAD 1: Buscar servidores con Audio Latino (lang == 3)
-m_servers = re.search(r'var servers = (\[.*?\]);', html, re.DOTALL)
-if m_servers:
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': '*/*'
+}
+
+def fetch_html(url, timeout=5, referer=None):
+    headers = dict(HEADERS)
+    if referer:
+        headers['Referer'] = referer
     try:
-        servers_json = json.loads(m_servers.group(1))
-        # Filtrar servidores en Audio Latino (lang = 3)
-        latino_servers = [s for s in servers_json if str(s.get('lang')) == '3']
-        target_servers = latino_servers if latino_servers else servers_json
+        req = urllib.request.Request(url, headers=headers)
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx).read().decode('utf-8', errors='ignore')
+    except Exception:
+        return None
 
-        for s in target_servers:
-            remote_b64 = s.get('remote', '')
-            if remote_b64:
+def resolve_direct_stream(url, referer=None):
+    if not url:
+        return None
+    url_lower = url.lower()
+
+    if '.m3u8' in url_lower or '.mp4' in url_lower:
+        return url
+
+    html = fetch_html(url, timeout=5, referer=referer)
+    if not html:
+        if any(k in url_lower for k in ['ok.ru', 'mega.nz', 'streamtape.com', 'filemoon', 'vidhide']):
+            return url
+        return None
+
+    # 1. Mediafire
+    if 'mediafire.com' in url_lower:
+        m = re.search(r'href=[\"\'](https?://download[^\'\"]+)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'aria-label=[\"\']Download file[\"\']\s+href=[\"\']([^\"\']+)[\"\']', html)
+        if m: return m.group(1)
+
+    # 2. Mp4upload
+    if 'mp4upload.com' in url_lower:
+        m = re.search(r'src:\s*[\"\'](https?://[^\'\"]+\.mp4)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'<source\s+src=[\"\'](https?://[^\'\"]+\.mp4)[\"\']', html)
+        if m: return m.group(1)
+
+    # 3. YourUpload
+    if 'yourupload.com' in url_lower:
+        m = re.search(r'file:\s*[\"\'](https?://[^\'\"]+\.mp4[^\'\"]*)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'data-url=[\"\']([^\"\']+\.mp4[^\'\"]*)[\"\']', html)
+        if m: return m.group(1)
+
+    # 4. Voe.sx
+    if 'voe.sx' in url_lower or 'voe-' in url_lower:
+        m = re.search(r'[\"\']hls[\"\']\s*:\s*[\"\'](https?://[^\'\"]+)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'[\"\']mp4[\"\']\s*:\s*[\"\'](https?://[^\'\"]+)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'window\.location\.href\s*=\s*[\"\'](https?://[^\'\"]+)[\"\']', html)
+        if m: return resolve_direct_stream(m.group(1), referer=url)
+
+    # 5. Streamwish / swdyu / sfastwish
+    if any(k in url_lower for k in ['streamwish', 'swdyu', 'sfastwish', 'wishfast', 'wishembed', 'strwish']):
+        m = re.search(r'sources:\s*\[\{\s*file:\s*[\"\'](https?://[^\'\"]+)[\"\']', html)
+        if m: return m.group(1)
+        m = re.search(r'file:\s*[\"\'](https?://[^\'\"]+\.m3u8[^\'\"]*)[\"\']', html)
+        if m: return m.group(1)
+
+    # 6. HTML5 tags
+    m = re.search(r'<source\s+[^>]*src=[\"\'](https?://[^\'\"]+)[\"\']', html)
+    if m: return m.group(1)
+
+    m = re.search(r'hls\.loadSource\(\s*[\"\'](https?://[^\'\"]+)[\"\']\s*\)', html)
+    if m: return m.group(1)
+
+    if any(k in url_lower for k in ['ok.ru', 'mega.nz', 'streamtape.com', 'filemoon', 'vidhide', 'doodstream', 'uqload']):
+        return url
+
+    return None
+
+def extract():
+    # 1. JKAnime
+    if provider == 'jkanime':
+        ep_url = anime_url.rstrip('/') + '/' + episode_num + '/'
+        html = fetch_html(ep_url)
+        if not html:
+            return None, "sub"
+        
+        target_lang = "3" if pref_audio == "latino" else "1"
+        fallback_lang = "1" if pref_audio == "latino" else "3"
+        
+        m_servers = re.search(r'var servers = (\[.*?\]);', html, re.DOTALL)
+        if m_servers:
+            try:
+                servers_json = json.loads(m_servers.group(1))
+                target_servers = [s for s in servers_json if str(s.get('lang')) == target_lang]
+                is_lat = bool(target_servers) if target_lang == "3" else False
+                if not target_servers:
+                    target_servers = [s for s in servers_json if str(s.get('lang')) == fallback_lang]
+                if not target_servers:
+                    target_servers = servers_json
+                
+                lang_tag = "latino" if is_lat else "sub"
+                
+                for s in target_servers:
+                    remote_b64 = s.get('remote', '')
+                    if remote_b64:
+                        try:
+                            decoded_url = base64.b64decode(remote_b64).decode('utf-8').strip()
+                            resolved = resolve_direct_stream(decoded_url, referer=ep_url)
+                            if resolved:
+                                return resolved, lang_tag
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+                
+        player_urls = re.findall(r'src=["\'](https://jkanime\.net/jkplayer/[^"\']+)["\']', html)
+        for p_url in player_urls:
+            try:
+                p_html = fetch_html(p_url, referer=ep_url)
+                if p_html:
+                    m_vid = re.search(r'video:\s*\{[^}]*url:\s*[\'\"]([^\'\"]+)[\'\"]', p_html)
+                    if m_vid:
+                        return m_vid.group(1), ("latino" if "latino" in ep_url else "sub")
+                    m_hls = re.search(r'hls\.loadSource\(\s*[\'\"]([^\'\"]+)[\'\"]\s*\)', p_html)
+                    if m_hls:
+                        return m_hls.group(1), ("latino" if "latino" in ep_url else "sub")
+            except Exception:
+                pass
+
+    # 2. TioAnime
+    elif provider == 'tioanime':
+        slug = anime_url.rstrip('/').split('/')[-1]
+        slug_base = re.sub(r'-(?:latino|castellano)$', '', slug)
+        
+        urls_to_try = []
+        if pref_audio == "latino":
+            urls_to_try.append(('https://tioanime.com/ver/{}-latino-{}'.format(slug_base, episode_num), 'latino'))
+            urls_to_try.append(('https://tioanime.com/ver/{}-{}'.format(slug, episode_num), 'latino' if 'latino' in slug else 'sub'))
+        else:
+            urls_to_try.append(('https://tioanime.com/ver/{}-{}'.format(slug_base, episode_num), 'sub'))
+
+        for ep_url, lang_tag in urls_to_try:
+            html = fetch_html(ep_url)
+            if not html:
+                continue
+            m_vids = re.search(r'var videos = (\[.*?\]);', html)
+            if m_vids:
                 try:
-                    decoded_url = base64.b64decode(remote_b64).decode('utf-8').strip()
-                    # Enlace directo de Mediafire
-                    if "mediafire.com" in decoded_url.lower():
-                        mf_req = urllib.request.Request(decoded_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        mf_html = urllib.request.urlopen(mf_req).read().decode('utf-8', errors='ignore')
-                        mf_m = re.search(r'href=[\"\'](https://download[^\'\"]+)[\"\']', mf_html)
-                        if mf_m:
-                            print(mf_m.group(1))
-                            sys.exit(0)
-                    
-                    # Enlace directo de Mp4upload
-                    if "mp4upload.com" in decoded_url.lower():
-                        mp4_req = urllib.request.Request(decoded_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        mp4_html = urllib.request.urlopen(mp4_req).read().decode('utf-8', errors='ignore')
-                        src_m = re.search(r'src:\s*[\"\'](https://[^\'\"]+\.mp4)[\"\']', mp4_html)
-                        if src_m:
-                            print(src_m.group(1))
-                            sys.exit(0)
-
-                    # Servidores de streaming compatibles directamente con MPV
-                    if any(k in decoded_url for k in ["voe.sx", "streamwish", "vidhide", "streamtape", "mega.nz", "d-s.io"]):
-                        print(decoded_url)
-                        sys.exit(0)
+                    videos = json.loads(m_vids.group(1))
+                    def srv_score(s):
+                        v = str(s[1]).lower()
+                        if 'yourupload' in v: return 1
+                        if 'mp4upload' in v: return 2
+                        if 'voe' in v: return 3
+                        if 'streamwish' in v: return 4
+                        if 'ok.ru' in v: return 5
+                        if 'mega' in v: return 6
+                        return 10
+                        
+                    videos.sort(key=srv_score)
+                    for s in videos:
+                        if len(s) > 1:
+                            resolved = resolve_direct_stream(s[1], referer=ep_url)
+                            if resolved:
+                                return resolved, lang_tag
                 except Exception:
                     pass
-    except Exception:
-        pass
 
-# PRIORIDAD 2: Reproductores HLS integrados (jkplayer)
-player_urls = re.findall(r'src=["\'](https://jkanime\.net/jkplayer/[^"\']+)["\']', html)
-for p_url in player_urls:
-    p_req = urllib.request.Request(p_url, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Referer': episode_url
-    })
-    try:
-        p_html = urllib.request.urlopen(p_req).read().decode('utf-8', errors='ignore')
-        m = re.search(r'hls\.loadSource\(\s*[\'\"]([^\'\"]+)[\'\"]\s*\)', p_html)
-        if m:
-            print(m.group(1))
-            sys.exit(0)
-        m = re.search(r'<source\s+src=[\'\"]([^\'\"]+)[\'\"]', p_html)
-        if m:
-            stream_url = re.sub(r'[^\x20-\x7E]', '', m.group(1))
-            if 'http' in stream_url:
-                stream_url = stream_url[stream_url.find('http'):]
-            print(stream_url)
-            sys.exit(0)
-    except Exception:
-        pass
+    # 3. MonosChinos
+    elif provider == 'monoschinos':
+        slug = anime_url.rstrip('/').split('/')[-1]
+        slug_base = re.sub(r'-(?:sub-espanol|audio-latino|castellano)$', '', slug)
+        
+        urls_to_try = []
+        if pref_audio == "latino":
+            urls_to_try.append(('https://monoschinos.st/ver/{}-audio-latino-episodio-{}'.format(slug_base, episode_num), 'latino'))
+            urls_to_try.append(('https://monoschinos.st/ver/{}-episodio-{}'.format(slug, episode_num), 'latino' if 'latino' in slug else 'sub'))
+        else:
+            urls_to_try.append(('https://monoschinos.st/ver/{}-episodio-{}'.format(slug_base, episode_num), 'sub'))
+
+        for ep_url, lang_tag in urls_to_try:
+            html = fetch_html(ep_url)
+            if not html:
+                continue
+            m_btns = re.findall(r'data-player=["\']([^"\']+)["\']', html)
+            decoded_servers = []
+            for b in m_btns:
+                try:
+                    dec = base64.b64decode(b).decode('utf-8', errors='ignore').strip()
+                    if dec.startswith('http'):
+                        decoded_servers.append(dec)
+                except Exception:
+                    pass
+                    
+            def mc_srv_score(u):
+                u_l = u.lower()
+                if 'mp4upload' in u_l: return 1
+                if 'yourupload' in u_l: return 2
+                if 'voe.sx' in u_l: return 3
+                if 'streamwish' in u_l or 'swdyu' in u_l: return 4
+                if 'filemoon' in u_l: return 5
+                if 'ok.ru' in u_l: return 6
+                if 'uqload' in u_l: return 7
+                return 10
+                
+            decoded_servers.sort(key=mc_srv_score)
+            for srv in decoded_servers:
+                resolved = resolve_direct_stream(srv, referer=ep_url)
+                if resolved:
+                    return resolved, lang_tag
+
+    # 4. AnimeFLV
+    elif provider == 'animeflv':
+        slug = anime_url.rstrip('/').split('/')[-1]
+        slug_base = re.sub(r'-(?:latino|tv-audio-latino|castellano)$', '', slug)
+        
+        urls_to_try = []
+        if pref_audio == "latino":
+            urls_to_try.append(('https://www3.animeflv.net/ver/{}-latino-{}'.format(slug_base, episode_num), 'latino'))
+            urls_to_try.append(('https://www3.animeflv.net/ver/{}-{}'.format(slug, episode_num), 'latino' if 'latino' in slug else 'sub'))
+        else:
+            urls_to_try.append(('https://www3.animeflv.net/ver/{}-{}'.format(slug_base, episode_num), 'sub'))
+
+        for ep_url, lang_tag in urls_to_try:
+            html = fetch_html(ep_url)
+            if not html:
+                continue
+            for a_m in re.finditer(r'<a[^>]+href=["\'](https?://[^"\']+)["\'][^>]*>(.*?)</a>', html):
+                h = a_m.group(1)
+                if any(k in h.lower() for k in ['yourupload', 'streamwish', 'swdyu', 'mega.nz', 'mediafire', 'mp4upload', 'ok.ru']):
+                    resolved = resolve_direct_stream(h, referer=ep_url)
+                    if resolved:
+                        return resolved, lang_tag
+
+    return None, "sub"
+
+stream, lang = extract()
+if stream:
+    print("{}|{}".format(stream, lang))
+else:
+    sys.exit(1)
 END_STREAM
 }
 
+# ==============================================================================
+# FUNCIÓN PRINCIPAL DE INTERFAZ Y REPRODUCCIÓN
+# ==============================================================================
 main() {
     clear
-    check_dependencies wget fzf grep sed python3 jq curl
+    check_dependencies grep sed
 
     local search_term="$arg1"
+    local last_entry=""
+
+    # Si se pide continuar (-c), consultar la base de datos local
+    if [ "$CONTINUE" == 1 ]; then
+        last_entry=$("$PY_CMD" - <<'END_CONT'
+import sqlite3, os
+def conection():
+    home_dir = os.path.expanduser("~")
+    db_dir = os.path.join(home_dir, ".anime")
+    os.makedirs(db_dir, exist_ok=True)
+    return sqlite3.connect(os.path.join(db_dir, "history.db"))
+
+try:
+    conect = conection()
+    cursor = conect.cursor()
+    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='animes'")
+    if cursor.fetchone()[0] > 0:
+        cursor.execute("PRAGMA table_info(animes)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if 'url' in cols and 'provider' in cols:
+            cursor.execute("SELECT anime, url, provider, last_cap, progress FROM animes ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                print(f"{row[0]}|{row[1]}|{row[2]}|{row[3]}|{row[4]}")
+except Exception:
+    pass
+END_CONT
+)
+        if [ -n "$last_entry" ]; then
+            titulo_elegido=$(echo "$last_entry" | cut -d'|' -f1)
+            nuevaurl=$(echo "$last_entry" | cut -d'|' -f2)
+            provider=$(echo "$last_entry" | cut -d'|' -f3)
+            capi=$(echo "$last_entry" | cut -d'|' -f4)
+            progress=$(echo "$last_entry" | cut -d'|' -f5)
+
+            if [ -z "$progress" ]; then progress="00:00:00"; fi
+            if [ -n "$titulo_elegido" ] && [ -n "$nuevaurl" ]; then
+                echo -e "${GREEN}[+] REANUDANDO:${NC} ${titulo_elegido} (Episodio ${capi}, Posición ${progress})"
+                sleep 1
+                play_episode "$capi"
+                return
+            fi
+        fi
+    fi
+
     if [[ -z "$search_term" ]]; then
-        local prompt_str=$'\001\033[0;32m\002[?] BUSCAR ANIME > \001\033[0m\002'
+        echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+        echo -e "  🎬 ${GREEN}${BOLD}ANIME-CMD v${VERSION}${NC} - Reproductor CLI Multi-Plataforma"
+        echo -e "  🔊 Modo por defecto: ${GREEN}Prioridad Audio Latino [LAT]${NC}"
+        echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        local prompt_str=$'\001\033[0;32m\002👉 [ BUSCAR ANIME ] > \001\033[0m\002'
         read -r -p "$prompt_str" search_term
         clear
     fi
@@ -297,12 +781,12 @@ main() {
         exit 0
     fi
 
-    echo -e "${CYAN}[~] BUSCANDO '${search_term}'...${NC}"
+    echo -e "${CYAN}[~] Buscando '${search_term}' en las fuentes agregadas...${NC}"
 
-    resultados=$(search_animes "$search_term")
+    resultados=$(search_animes "$search_term" "$AUDIO_PREF")
 
     if [[ -z "$resultados" ]]; then
-        echo -e "${RED}[-] No se encontraron resultados para '${search_term}'${NC}"
+        echo -e "${RED}[-] No se encontraron resultados para '${search_term}' en ninguna plataforma.${NC}"
         read -p "Presiona ENTER para volver a buscar..." dummy
         arg1=""
         main
@@ -313,13 +797,21 @@ main() {
     if [[ "$num_animes" == "1" ]]; then
         opcion="$resultados"
     else
-        clear
-        echo -e "${GREEN}[*] RESULTADOS DE BÚSQUEDA para '${search_term}'${NC}"
-        opcion=$( (echo "$resultados"; echo "Salir|Salir") | tac | fzf --delimiter='\|' --with-nth=1 --prompt="[ SELECCIONA UN ANIME ] > " --height=~20 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
+        opcion=$( (echo "$resultados"; echo "❌ Salir|Salir|none") | tac | fzf \
+            --delimiter='\|' \
+            --with-nth=1 \
+            --prompt="👉 [ SELECCIONA UN ANIME ] > " \
+            --header="🔊 = Doblaje Latino disponible | 🇯🇵 = Japonés Subtitulado | 🇪🇸 = Castellano" \
+            --height=~30 \
+            --border=rounded \
+            --info=inline \
+            --margin=1 \
+            --layout=reverse \
+            --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00,header:#00ffff)
     fi
 
-    # Manejo de tecla ESC o Salir -> Volver al buscador
-    if [[ -z "$opcion" ]] || [[ "$opcion" == "Salir|Salir" ]] || [[ "$opcion" == "Salir" ]]; then
+    # Manejo de tecla ESC o Salir
+    if [[ -z "$opcion" ]] || [[ "$opcion" == "❌ Salir|Salir|none" ]] || [[ "$opcion" == "Salir" ]]; then
         arg1=""
         main
         return
@@ -329,10 +821,20 @@ main() {
 
     titulo_elegido=$(echo "$opcion" | cut -d'|' -f1)
     nuevaurl=$(echo "$opcion" | cut -d'|' -f2)
+    provider=$(echo "$opcion" | cut -d'|' -f3)
 
-    echo -e "${CYAN}[~] OBTENIENDO METADATOS DE: ${titulo_elegido}...${NC}"
+    if [ -z "$provider" ]; then provider="jkanime"; fi
 
-    meta=$(get_anime_metadata "$nuevaurl")
+    if [[ "$titulo_elegido" == *"🔊"* ]] || [[ "$titulo_elegido" == *"[LAT]"* ]]; then
+        AUDIO_PREF="latino"
+    fi
+
+    # Limpiar título para visualización
+    clean_title=$(echo "$titulo_elegido" | sed -E 's/^(🔊|🇯🇵|🇪🇸)?\s*\[(LAT|SUB|CAST)\]\s*\[[a-zA-Z0-9_-]+\]\s*//g')
+
+    echo -e "${CYAN}[~] Obteniendo lista de episodios de: ${WHITE}${clean_title}${NC}..."
+
+    meta=$(get_anime_metadata "$nuevaurl" "$provider")
     num_episodios=$(echo "$meta" | cut -d'|' -f1)
     tipo=$(echo "$meta" | cut -d'|' -f2)
 
@@ -340,59 +842,17 @@ main() {
         num_episodios=1
     fi
 
-    last_cap=$(python3 - <<END
-import sqlite3, os
-def conection():
-    home_dir = os.path.expanduser("~")
-    db_path = os.path.join(home_dir, "ani-es", "history.db")
-    return sqlite3.connect(db_path)
+    clear
+    echo -e "${GREEN}[+] ANIME:${NC} ${WHITE}${clean_title}${NC} (${num_episodios} episodios - ${tipo})"
+    capi=$(seq 1 "$num_episodios" | fzf \
+        --prompt="👉 [ SELECCIONA UN EPISODIO ] > " \
+        --height=~30 \
+        --border=rounded \
+        --reverse \
+        --layout=reverse \
+        --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
 
-anime = '$titulo_elegido'
-conect = conection()
-cursor = conect.cursor()
-cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='animes'")
-if cursor.fetchone()[0] == 0:
-    cursor.execute("CREATE TABLE animes (id INTEGER PRIMARY KEY, anime TEXT, last_cap TEXT, progress TEXT)")
-    conect.commit()
-cursor.execute('SELECT * FROM animes WHERE anime = ?', (anime,))
-row = cursor.fetchone()
-if row:
-    print(row[2])
-END
-)
-
-    if [ "$CONTINUE" == 1 ] && [ -n "$last_cap" ]; then
-        capi=$last_cap
-        progress=$(python3 - <<END
-import sqlite3, os
-def conection():
-    home_dir = os.path.expanduser("~")
-    db_path = os.path.join(home_dir, "ani-es", "history.db")
-    return sqlite3.connect(db_path)
-
-conect = conection()
-cursor = conect.cursor()
-cursor.execute(f'SELECT progress from animes WHERE anime="$titulo_elegido"')
-response=cursor.fetchone()
-if response and response[0]:
-    print(response[0])
-else:
-    print("00:00:00")
-END
-)
-    else
-        clear
-        echo -e "${GREEN}[+] ANIME: ${titulo_elegido} (${num_episodios} episodios)${NC}"
-        capi=$(seq 1 "$num_episodios" | fzf \
-            --prompt="[ SELECCIONA UN EPISODIO ] > " \
-            --height=~30 \
-            --border=rounded \
-            --reverse \
-            --layout=reverse \
-            --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
-    fi
-
-    # Manejo de tecla ESC al elegir episodio -> Volver a la búsqueda
+    # Manejo de tecla ESC al elegir episodio
     if [ -z "$capi" ]; then
         arg1=""
         main
@@ -401,30 +861,53 @@ END
 
     clear
 
-    if [ "$tipo" == "Pelicula" ]; then
-        capi="pelicula"
+    if [ "$tipo" == "Pelicula" ] || [ "$tipo" == "pelicula" ]; then
+        capi="1"
     fi
 
     play_episode() {
         local ep_num=$1
-        local ep_url="${nuevaurl%%/}/$ep_num"
 
         clear
-        echo -e "${CYAN}[~] OBTENIENDO TRANSMISIÓN (AUDIO LATINO) PARA EL CAPÍTULO $ep_num...${NC}"
+        echo -e "${CYAN}[~] Conectando con servidor de vídeo para el capítulo $ep_num...${NC}"
 
-        src_contenido=$(extract_stream "$ep_url")
+        raw_extract=$(extract_stream "$nuevaurl" "$provider" "$ep_num" "$AUDIO_PREF")
+        src_contenido=$(echo "$raw_extract" | cut -d'|' -f1)
+        detected_lang=$(echo "$raw_extract" | cut -d'|' -f2)
 
         if [ -z "$src_contenido" ]; then
-            echo -e "${RED}[-] No se pudo extraer la transmisión para el capítulo $ep_num.${NC}"
-            read -p "Presiona ENTER para continuar..." dummy
+            echo -e "${RED}[-] No se pudo extraer la transmisión para el capítulo $ep_num en $provider.${NC}"
+            read -p "Presiona ENTER para volver al menú..." dummy
             arg1=""
             main
             return
         fi
 
         clear
-        echo -e "${GREEN}[+] REPRODUCTOR INICIADO: ${titulo_elegido} - CAPÍTULO $ep_num${NC}"
-        echo -e "${CYAN}[~] Cargando transmisión... (Cierra la ventana de MPV para continuar)${NC}"
+        local label_lang="Audio Latino"
+        local title_prefix="[AUDIO LATINO]"
+        if [ "$detected_lang" == "sub" ]; then
+            label_lang="Subtitulado (Japonés)"
+            title_prefix="[SUBTITULADO]"
+        elif [ "$detected_lang" == "castellano" ]; then
+            label_lang="Castellano"
+            title_prefix="[CASTELLANO]"
+        fi
+
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        if [ "$detected_lang" == "latino" ]; then
+            echo -e "  🔊 ${GREEN}${BOLD}REPRODUCIENDO EN AUDIO LATINO${NC}"
+        else
+            echo -e "  🇯🇵 ${YELLOW}${BOLD}REPRODUCIENDO EN JAPONÉS SUBTITULADO${NC}"
+        fi
+        echo -e "     ${CYAN}Anime:${NC}     ${WHITE}${clean_title}${NC}"
+        echo -e "     ${CYAN}Capítulo:${NC}  ${WHITE}${ep_num}${NC}"
+        echo -e "     ${CYAN}Fuente:${NC}    ${WHITE}${provider}${NC} (${label_lang})"
+        if [ "$detected_lang" == "sub" ] && [ "$AUDIO_PREF" == "latino" ]; then
+            echo -e "     ${YELLOW}Nota:${NC}      No se encontró doblaje latino para este episodio en esta fuente."
+        fi
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}[~] Transmisión iniciada en MPV... (Presiona 'q' para menú de opciones)${NC}"
 
         ENV=$(detect_env)
         pos=0
@@ -432,9 +915,9 @@ END
         case "$ENV" in
             wsl|windows)
                 if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 else
                     echo -e "${RED}mpv no encontrado en el PATH de Windows${NC}"
                 fi
@@ -450,70 +933,89 @@ END
                 ;;
             linux)
                 if command -v mpv >/dev/null 2>&1; then
-                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 elif command -v mpv.exe >/dev/null 2>&1; then
-                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="$titulo_elegido - Capítulo $ep_num" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
+                    pos=$(mpv.exe --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g' 2>&1)
                 fi
                 ;;
         esac
 
-        python3 - <<END
-import sqlite3, os
-def conection():
-    home_dir = os.path.expanduser("~")
-    db_path = os.path.join(home_dir, "ani-es", "history.db")
-    return sqlite3.connect(db_path)
+        # Actualizar historial SQLite
+        "$PY_CMD" - "$clean_title" "$nuevaurl" "$provider" "$ep_num" "$pos" <<'END_HIST'
+import sys, sqlite3, os
+anime = sys.argv[1]
+url = sys.argv[2]
+provider = sys.argv[3]
+capi = sys.argv[4]
+progress = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "00:00:00"
 
-anime = '$titulo_elegido'
-capi = '$ep_num'
-progress = "$pos"
+home_dir = os.path.expanduser("~")
+db_dir = os.path.join(home_dir, ".anime")
+os.makedirs(db_dir, exist_ok=True)
+db_path = os.path.join(db_dir, "history.db")
 
-conect = conection()
+conect = sqlite3.connect(db_path)
 cursor = conect.cursor()
-cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='animes'")
-if cursor.fetchone()[0] == 0:
-    cursor.execute("CREATE TABLE animes (id INTEGER PRIMARY KEY, anime TEXT, last_cap TEXT, progress TEXT)")
-    conect.commit()
+cursor.execute("CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, anime TEXT, url TEXT, provider TEXT, last_cap TEXT, progress TEXT)")
 
 cursor.execute("PRAGMA table_info(animes)")
-columns = [col[1] for col in cursor.fetchall()]
+cols = [col[1] for col in cursor.fetchall()]
+if "url" not in cols:
+    cursor.execute("ALTER TABLE animes ADD COLUMN url TEXT")
+if "provider" not in cols:
+    cursor.execute("ALTER TABLE animes ADD COLUMN provider TEXT")
+if "progress" not in cols:
+    cursor.execute("ALTER TABLE animes ADD COLUMN progress TEXT DEFAULT '00:00:00'")
+conect.commit()
 
-if "progress" not in columns:
-    cursor.execute("ALTER TABLE animes ADD COLUMN progress TEXT DEFAULT 0")
-    conect.commit()
-
-cursor.execute('SELECT * FROM animes WHERE anime = ?', (anime,))
+cursor.execute('SELECT id FROM animes WHERE anime = ?', (anime,))
 row = cursor.fetchone()
 
 if row is None:
-    cursor.execute('INSERT INTO animes (anime, last_cap, progress) VALUES (?, ?, ?)', (anime, capi, progress))
+    cursor.execute('INSERT INTO animes (anime, url, provider, last_cap, progress) VALUES (?, ?, ?, ?, ?)', (anime, url, provider, capi, progress))
 else:
-    try:
-        if int(row[2]) < int(capi):
-            cursor.execute("UPDATE animes SET last_cap = ?, progress = ? WHERE anime = ?", (capi, progress, anime))
-        else:
-            cursor.execute("UPDATE animes SET progress = ? WHERE anime = ?", (progress, anime))
-    except Exception:
-        cursor.execute("UPDATE animes SET last_cap = ?, progress = ? WHERE anime = ?", (capi, progress, anime))
+    cursor.execute("UPDATE animes SET url = ?, provider = ?, last_cap = ?, progress = ? WHERE anime = ?", (url, provider, capi, progress, anime))
 
 conect.commit()
-END
+END_HIST
 
-        op=$( (echo "Siguiente"; echo "Retroceder"; echo "Atras") | tac | fzf --prompt="[ ACCIÓN ] > " --height=12 --border=rounded --info=inline --margin=1 --layout=reverse --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
+        local audio_toggle_label="🇯🇵 Cambiar a Subtitulado"
+        if [ "$AUDIO_PREF" != "latino" ]; then
+            audio_toggle_label="🔊 Cambiar a Audio Latino"
+        fi
 
-        if [[ "$op" == "Siguiente" ]]; then
+        op=$( (echo "▶ Siguiente capítulo"; echo "◀ Capítulo anterior"; echo "$audio_toggle_label"; echo "🔍 Buscar otro anime"; echo "❌ Salir") | fzf \
+            --prompt="👉 [ ¿QUÉ DESEAS HACER? ] > " \
+            --height=14 \
+            --border=rounded \
+            --info=inline \
+            --margin=1 \
+            --layout=reverse \
+            --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#ffffff,bg+:-1,hl+:#00ff00,pointer:#00ff00,info:#00ff00,prompt:#00ff00)
+
+        if [[ "$op" == *"Siguiente"* ]]; then
             progress="00:00:00"
             play_episode $((ep_num + 1))
-        elif [[ "$op" == "Retroceder" ]]; then
+        elif [[ "$op" == *"anterior"* ]]; then
             progress="00:00:00"
             if [ $ep_num -gt 1 ]; then
                 play_episode $((ep_num - 1))
             else
                 play_episode 1
             fi
-        elif [[ "$op" == "Atras" ]] || [[ -z "$op" ]]; then
+        elif [[ "$op" == *"Cambiar a"* ]]; then
+            if [[ "$AUDIO_PREF" == "latino" ]]; then
+                AUDIO_PREF="sub"
+            else
+                AUDIO_PREF="latino"
+            fi
+            play_episode $ep_num
+        elif [[ "$op" == *"Buscar otro"* ]] || [[ -z "$op" ]]; then
             arg1=""
             main
+        elif [[ "$op" == *"Salir"* ]]; then
+            clear
+            exit 0
         fi
     }
 

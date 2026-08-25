@@ -1,118 +1,227 @@
-# ==========================================================
-# 🎬 Anime-CMD - Instalador Automático para Windows
+# ==============================================================================
+# Anime-CMD v2.1 - Instalador y Actualizador Automatico para Windows
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
-# ==========================================================
+# ==============================================================================
 
 $ErrorActionPreference = "Continue"
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "         🎬 Instalador Automático de Anime-CMD            " -ForegroundColor Green
+Write-Host "         Instalador Automatico de Anime-CMD v2.1          " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Definir directorio de instalación
 $installDir = "$HOME\.anime"
+
+# ------------------------------------------------------------------------------
+# 1. Limpieza de instalaciones anteriores
+# ------------------------------------------------------------------------------
+Write-Host "[1/5] Limpiando versiones y archivos temporales anteriores..." -ForegroundColor Cyan
+
+$oldPaths = @(
+    "$HOME\ani-es",
+    "$HOME\.anime-cmd",
+    "$HOME\AppData\Local\ani-es"
+)
+
+foreach ($old in $oldPaths) {
+    if (Test-Path $old) {
+        try {
+            Remove-Item -Path $old -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "  -> Carpeta previa eliminada: $old" -ForegroundColor Gray
+        } catch {
+        }
+    }
+}
+
+# Crear o limpiar directorio de instalacion principal
 if (!(Test-Path $installDir)) {
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+} else {
+    Remove-Item -Path "$installDir\ani-es" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$installDir\anime.cmd" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$installDir\anime.bat" -Force -ErrorAction SilentlyContinue
 }
 
-# 2. Verificar e instalar gestor de paquetes si faltan dependencias
+Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
+
+# ------------------------------------------------------------------------------
+# 2. Verificacion e instalacion de dependencias necesarias (SIN wget, SIN jq)
+# ------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Cyan
+
 $missingDeps = @()
 
-if (!(Get-Command git -ErrorAction SilentlyContinue) -and !(Test-Path "C:\Program Files\Git\bin\bash.exe")) {
+# Git (Git Bash)
+$gitBash = $null
+if (Test-Path "C:\Program Files\Git\bin\bash.exe") {
+    $gitBash = "C:\Program Files\Git\bin\bash.exe"
+} elseif (Test-Path "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe") {
+    $gitBash = "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
+} elseif (Get-Command git.exe -ErrorAction SilentlyContinue) {
+    $gitCmd = (Get-Command git.exe).Source
+    $possibleBash = Join-Path (Split-Path (Split-Path $gitCmd -Parent) -Parent) "bin\bash.exe"
+    if (Test-Path $possibleBash) { $gitBash = $possibleBash }
+}
+
+if (!$gitBash -and !(Get-Command git.exe -ErrorAction SilentlyContinue)) {
     $missingDeps += "git"
+    Write-Host "  [!] Git: NO encontrado" -ForegroundColor Yellow
+} else {
+    Write-Host "  [OK] Git Bash: Presente" -ForegroundColor Green
 }
-if (!(Get-Command python -ErrorAction SilentlyContinue) -and !(Get-Command python3 -ErrorAction SilentlyContinue)) {
+
+# Python
+$hasPython = (Get-Command python.exe -ErrorAction SilentlyContinue) -or `
+             (Get-Command python3.exe -ErrorAction SilentlyContinue) -or `
+             (Get-Command py.exe -ErrorAction SilentlyContinue)
+if (!$hasPython) {
     $missingDeps += "python"
+    Write-Host "  [!] Python: NO encontrado" -ForegroundColor Yellow
+} else {
+    Write-Host "  [OK] Python: Presente" -ForegroundColor Green
 }
-if (!(Get-Command mpv -ErrorAction SilentlyContinue) -and !(Get-Command mpv.exe -ErrorAction SilentlyContinue)) {
+
+# MPV
+$hasMpv = (Get-Command mpv.exe -ErrorAction SilentlyContinue) -or (Get-Command mpv -ErrorAction SilentlyContinue)
+if (!$hasMpv) {
     $missingDeps += "mpv"
+    Write-Host "  [!] MPV: NO encontrado" -ForegroundColor Yellow
+} else {
+    Write-Host "  [OK] MPV: Presente" -ForegroundColor Green
 }
-if (!(Get-Command fzf -ErrorAction SilentlyContinue) -and !(Get-Command fzf.exe -ErrorAction SilentlyContinue)) {
+
+# FZF
+$hasFzf = (Get-Command fzf.exe -ErrorAction SilentlyContinue) -or (Get-Command fzf -ErrorAction SilentlyContinue)
+if (!$hasFzf) {
     $missingDeps += "fzf"
-}
-if (!(Get-Command jq -ErrorAction SilentlyContinue) -and !(Get-Command jq.exe -ErrorAction SilentlyContinue)) {
-    $missingDeps += "jq"
-}
-if (!(Get-Command wget -ErrorAction SilentlyContinue) -and !(Get-Command wget.exe -ErrorAction SilentlyContinue)) {
-    $missingDeps += "wget"
+    Write-Host "  [!] FZF: NO encontrado" -ForegroundColor Yellow
+} else {
+    Write-Host "  [OK] FZF: Presente" -ForegroundColor Green
 }
 
+# Instalacion automatica si falta alguna dependencia
 if ($missingDeps.Count -gt 0) {
-    Write-Host "[*] Dependencias faltantes detectadas: $($missingDeps -join ', ')" -ForegroundColor Yellow
-    Write-Host "[*] Instalando dependencias necesarias automáticamente..." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "[*] Instalando dependencias faltantes automaticamente: $($missingDeps -join ', ')..." -ForegroundColor Yellow
 
-    # Intentar con Scoop si está disponible o instalar Scoop
-    if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        Write-Host "-> Usando Scoop para instalar dependencias..." -ForegroundColor Green
-        scoop install git python mpv fzf jq wget curl
-    }
-    elseif (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "-> Usando WinGet para instalar dependencias..." -ForegroundColor Green
-        if ($missingDeps -contains "git") { winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-        if ($missingDeps -contains "python") { winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-        if ($missingDeps -contains "mpv") { winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-        if ($missingDeps -contains "fzf") { winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-        if ($missingDeps -contains "jq") { winget install --id jqlang.jq -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-        if ($missingDeps -contains "wget") { winget install --id JernejSimoncic.Wget -e --source winget --accept-package-agreements --accept-source-agreements --silent }
-    }
-    else {
-        Write-Host "-> Instalando Scoop para gestionar dependencias de forma limpia..." -ForegroundColor Green
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        Write-Host "-> Utilizando Windows Package Manager (WinGet)..." -ForegroundColor Cyan
+        if ($missingDeps -contains "git") {
+            Write-Host "   Instalando Git..." -ForegroundColor Cyan
+            & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        }
+        if ($missingDeps -contains "python") {
+            Write-Host "   Instalando Python..." -ForegroundColor Cyan
+            & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        }
+        if ($missingDeps -contains "mpv") {
+            Write-Host "   Instalando MPV Player..." -ForegroundColor Cyan
+            & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        }
+        if ($missingDeps -contains "fzf") {
+            Write-Host "   Instalando FZF..." -ForegroundColor Cyan
+            & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
+        }
+    } elseif (Get-Command scoop.exe -ErrorAction SilentlyContinue) {
+        Write-Host "-> Utilizando Scoop Package Manager..." -ForegroundColor Cyan
+        & scoop install $missingDeps
+    } else {
+        Write-Host "-> Configurando Scoop para instalar dependencias de forma limpia..." -ForegroundColor Cyan
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
         Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-        scoop install git python mpv fzf jq wget curl
+        & scoop install $missingDeps
     }
-} else {
-    Write-Host "[✔] Todas las dependencias principales están presentes." -ForegroundColor Green
 }
 
-# Instalar BeautifulSoup para Python si Python está presente
+# ------------------------------------------------------------------------------
+# 3. Instalacion de BeautifulSoup4 en Python
+# ------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "[3/5] Configurando librerias de Python..." -ForegroundColor Cyan
+
 if (Get-Command pip -ErrorAction SilentlyContinue) {
-    Write-Host "[*] Verificando módulo BeautifulSoup4 en Python..." -ForegroundColor Cyan
-    pip install --quiet beautifulsoup4 2>$null
+    & pip install --quiet beautifulsoup4 2>&1 | Out-Null
+    Write-Host "  [OK] BeautifulSoup4 configurado correctamente." -ForegroundColor Green
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    & py -m pip install --quiet beautifulsoup4 2>&1 | Out-Null
+    Write-Host "  [OK] BeautifulSoup4 configurado correctamente." -ForegroundColor Green
 }
 
-# 3. Descargar el script principal desde tu repositorio
+# ------------------------------------------------------------------------------
+# 4. Descargar la version mas reciente del script principal
+# ------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Cyan
+
 $repoUrl = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
-Write-Host "[*] Descargando la última versión de Anime-CMD..." -ForegroundColor Cyan
-Invoke-WebRequest -Uri "$repoUrl/ani-es" -OutFile "$installDir\ani-es" -UseBasicParsing
+$aniScriptPath = "$installDir\ani-es"
 
-# 4. Crear el comando ejecutable anime.cmd
-$cmdContent = @"
-@echo off
-setlocal
-set "BASH_PATH="
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri "$repoUrl/ani-es" -OutFile $aniScriptPath -UseBasicParsing
+    Write-Host "  [OK] Script principal descargado con exito." -ForegroundColor Green
+} catch {
+    Write-Host "  [!] Reintentando descarga con WebClient..." -ForegroundColor Yellow
+    $webClient = New-Object System.Net.WebClient
+    $webClient.DownloadFile("$repoUrl/ani-es", $aniScriptPath)
+    Write-Host "  [OK] Script principal descargado con exito." -ForegroundColor Green
+}
 
-if exist "C:\Program Files\Git\bin\bash.exe" (
-    set "BASH_PATH=C:\Program Files\Git\bin\bash.exe"
-) else (
-    for %%X in (bash.exe) do (set "BASH_PATH=%%~`$PATH:X")
+# Crear el comando ejecutable anime.cmd
+$cmdLines = @(
+    "@echo off",
+    "setlocal",
+    "set `"BASH_PATH=`"",
+    "",
+    "if exist `"C:\Program Files\Git\bin\bash.exe`" (",
+    "    set `"BASH_PATH=C:\Program Files\Git\bin\bash.exe`"",
+    ") else if exist `"%LOCALAPPDATA%\Programs\Git\bin\bash.exe`" (",
+    "    set `"BASH_PATH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe`"",
+    ") else (",
+    "    for %%X in (bash.exe) do (set `"BASH_PATH=%%~`$PATH:X`")",
+    ")",
+    "",
+    "if not defined BASH_PATH (",
+    "    echo [ERROR] Git Bash no fue encontrado. Asegurate de tener Git instalado.",
+    "    exit /b 1",
+    ")",
+    "",
+    "`"%BASH_PATH%`" `"%~dp0ani-es`" %*"
 )
 
-if not defined BASH_PATH (
-    echo [ERROR] Git Bash no fue encontrado. Asegurate de tener Git instalado.
-    exit /b 1
-)
+[System.IO.File]::WriteAllLines("$installDir\anime.cmd", $cmdLines)
+Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
 
-"%BASH_PATH%" "$installDir\ani-es" %*
-"@
+# ------------------------------------------------------------------------------
+# 5. Configurar variable de entorno PATH
+# ------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "[5/5] Configurando variables de entorno..." -ForegroundColor Cyan
 
-Set-Content -Path "$installDir\anime.cmd" -Value $cmdContent -Encoding ASCII
-
-# 5. Agregar $installDir al PATH del usuario si no está presente
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($null -eq $userPath) {
+    $userPath = ""
+}
+
 if ($userPath -notlike "*$installDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$userPath;$installDir", "User")
+    $newPath = "$userPath;$installDir"
+    if ($userPath -eq "") {
+        $newPath = $installDir
+    }
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
     $env:Path += ";$installDir"
-    Write-Host "[✔] $installDir añadido a tu variable de entorno PATH." -ForegroundColor Green
+    Write-Host "  [OK] $installDir anadido a tu variable PATH." -ForegroundColor Green
+} else {
+    Write-Host "  [OK] PATH ya configurado correctamente." -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  ✨ ¡Instalación de Anime-CMD completada con éxito! ✨   " -ForegroundColor Green
+Write-Host "  Instalacion limpia de Anime-CMD v2.1 completada!        " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "👉 Abre una nueva ventana de CMD o PowerShell y escribe:" -ForegroundColor Cyan
+Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Cyan
 Write-Host "   anime" -ForegroundColor Yellow
 Write-Host ""
