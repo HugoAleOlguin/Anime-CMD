@@ -4,6 +4,8 @@
 # ==============================================================================
 
 $ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -34,7 +36,7 @@ foreach ($old in $oldPaths) {
     }
 }
 
-# Crear o limpiar directorio de instalacion principal
+# Crear o preparar directorio de instalacion principal
 if (!(Test-Path $installDir)) {
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 } else {
@@ -157,51 +159,21 @@ if (!$hasPython) {
     Write-Host "  [OK] Python: Presente" -ForegroundColor Green
 }
 
-# MPV
-$mpvPath = Find-MpvExe
-if (!$mpvPath) {
-    Write-Host "  [!] MPV: NO encontrado, procediendo a instalar..." -ForegroundColor Yellow
-    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        Write-Host "   -> Intentando instalar MPV via WinGet..." -ForegroundColor Cyan
-        & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
-        $mpvPath = Find-MpvExe
-    }
-    
-    if (!$mpvPath) {
-        Write-Host "   -> Instalando MPV via Scoop..." -ForegroundColor Cyan
-        if (!(Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
-            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-        }
-        & scoop install mpv
-        $mpvPath = Find-MpvExe
-    }
-}
-
-if ($mpvPath) {
-    Write-Host "  [OK] MPV: Presente ($mpvPath)" -ForegroundColor Green
-    # Si mpv.exe esta en una subcarpeta o paquete, copiarlo a $installDir para acceso inmediato
-    if ($mpvPath -ne "$installDir\mpv.exe" -and (Test-Path $mpvPath)) {
-        try {
-            $mpvDir = Split-Path $mpvPath -Parent
-            Copy-Item -Path "$mpvDir\*" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
-        } catch {}
-    }
-} else {
-    Write-Host "  [!] Advertencia: MPV no pudo ser instalado automaticamente." -ForegroundColor Yellow
-}
-
 # FZF
 $fzfPath = Find-FzfExe
 if (!$fzfPath) {
-    Write-Host "  [!] FZF: NO encontrado, instalando..." -ForegroundColor Yellow
-    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
-        $fzfPath = Find-FzfExe
-    }
-    if (!$fzfPath -and (Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
-        & scoop install fzf
-        $fzfPath = Find-FzfExe
+    Write-Host "  [*] Instalando FZF de forma autonoma..." -ForegroundColor Cyan
+    try {
+        $fzfZip = "$env:TEMP\fzf_download.zip"
+        Invoke-WebRequest -Uri "https://github.com/junegunn/fzf/releases/download/v0.60.3/fzf-0.60.3-windows_amd64.zip" -OutFile $fzfZip -UseBasicParsing
+        Expand-Archive -Path $fzfZip -DestinationPath $installDir -Force
+        Remove-Item -Path $fzfZip -Force -ErrorAction SilentlyContinue
+        $fzfPath = "$installDir\fzf.exe"
+    } catch {
+        if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+            & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
+            $fzfPath = Find-FzfExe
+        }
     }
 }
 
@@ -213,7 +185,53 @@ if ($fzfPath) {
         } catch {}
     }
 } else {
-    Write-Host "  [!] Advertencia: FZF no pudo ser instalado automaticamente." -ForegroundColor Yellow
+    Write-Host "  [!] FZF: No se pudo configurar automaticamente." -ForegroundColor Yellow
+}
+
+# MPV
+$mpvPath = Find-MpvExe
+if (!$mpvPath) {
+    Write-Host "  [*] Instalando MPV Player de forma autonoma..." -ForegroundColor Cyan
+    
+    # 1. Descarga directa standalone de MPV
+    try {
+        $mpv7z = "$env:TEMP\mpv_download.7z"
+        Write-Host "    -> Descargando paquete optimizado de MPV..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260814/mpv-x86_64-20260814-git-7b8915bc1d.7z" -OutFile $mpv7z -UseBasicParsing
+        & tar -xf $mpv7z -C $installDir
+        Remove-Item -Path $mpv7z -Force -ErrorAction SilentlyContinue
+        if (Test-Path "$installDir\mpv.exe") {
+            $mpvPath = "$installDir\mpv.exe"
+        }
+    } catch {
+        # Fallback a WinGet o Scoop si la descarga directa fallara
+        if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+            Write-Host "    -> Intentando WinGet..." -ForegroundColor Cyan
+            & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
+            $mpvPath = Find-MpvExe
+        }
+        if (!$mpvPath) {
+            Write-Host "    -> Intentando Scoop..." -ForegroundColor Cyan
+            if (!(Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
+                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+                Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+            }
+            & scoop install mpv
+            $mpvPath = Find-MpvExe
+        }
+    }
+}
+
+if ($mpvPath) {
+    Write-Host "  [OK] MPV: Presente ($mpvPath)" -ForegroundColor Green
+    if ($mpvPath -ne "$installDir\mpv.exe" -and (Test-Path $mpvPath)) {
+        try {
+            $mpvDir = Split-Path $mpvPath -Parent
+            Copy-Item -Path "$mpvDir\*" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+} else {
+    Write-Host "  [!] MPV: No se pudo configurar automaticamente." -ForegroundColor Yellow
 }
 
 # ------------------------------------------------------------------------------
@@ -242,7 +260,6 @@ $aniScriptUrl = "$repoUrl/ani-es?v=$cacheBust"
 $aniScriptPath = "$installDir\ani-es"
 
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
     Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
 } catch {
@@ -257,7 +274,7 @@ try {
 $cmdLines = @(
     "@echo off",
     "setlocal",
-    "set `"PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims;%USERPROFILE%\.anime`"",
+    "set `"PATH=%~dp0;%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims`"",
     "set `"BASH_PATH=`"",
     "",
     "if exist `"C:\Program Files\Git\bin\bash.exe`" (",
