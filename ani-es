@@ -874,11 +874,17 @@ elif provider == 'animeonline':
                     soup = BeautifulSoup(html_ao, 'html.parser')
                     for li in soup.select('ul.episodios li, .episodios li'):
                         a = li.find('a', href=True)
-                        if a and '/episodio/' in a['href'] and a['href'] not in ep_urls:
+                        if not a or '/episodio/' not in a['href']:
+                            continue
+                        num = li.select_one('.numerando')
+                        num_txt = num.get_text(strip=True) if num else ''
+                        if re.search(r'-\s*0$', num_txt) or num_txt == '0':
+                            continue
+                        if a['href'] not in ep_urls:
                             ep_urls.append(a['href'])
                 if not ep_urls:
                     for href in re.findall(r'href=["\'](https?://[^"\']+/episodio/[^"\']+)["\']', html_ao):
-                        if href not in ep_urls:
+                        if not re.search(r'-0/?$', href) and href not in ep_urls:
                             ep_urls.append(href)
         except Exception:
             pass
@@ -944,7 +950,7 @@ def resolve_direct_stream(url, referer=None):
         return None, None
     url_lower = url.lower()
 
-    if '.m3u8' in url_lower or '.mp4' in url_lower:
+    if bool(re.search(r'\.(?:mp4|m3u8)(?:[?#]|$)', url_lower)):
         return url, referer
 
     html = fetch_html(url, timeout=5, referer=referer)
@@ -1022,21 +1028,47 @@ def unpack_streamwish(html):
     except Exception:
         return None
 
+def verify_stream(url, referer=None, timeout=2.5):
+    if not url or not url.startswith('http'):
+        return bool(url)
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': referer or ''
+        }
+        if '.m3u8' not in url.lower():
+            headers['Range'] = 'bytes=0-1024'
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            ctype = resp.headers.get('Content-Type', '').lower()
+            if 'text/html' in ctype:
+                return False
+            return resp.status in (200, 206)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404, 410):
+            return False
+        return True
+    except Exception:
+        return False
+
 def extract_streamtape(html):
-    m = re.search(r"document\.getElementById\(['\"](?:robotlink|ideolink)['\"]\)\.innerHTML\s*=\s*['\"]([^'\"]+)['\"]", html)
-    m_sub = re.search(r"\+[\s\n]*\(['\"]([^'\"]+)['\"]\)\.substring\((\d+)\)(?:\.substring\((\d+)\))?", html)
-    if m and m_sub:
-        try:
-            p1 = m.group(1)
-            part = m_sub.group(1)
-            s1 = int(m_sub.group(2))
-            s2 = int(m_sub.group(3)) if m_sub.group(3) else 0
-            part_clean = part[s1:][s2:]
-            if full.startswith('//'): full = 'https:' + full
-            full = re.sub(r'streamtape\.[a-z0-9]+', 'streamtape.com', full)
-            return full
-        except Exception:
-            pass
+    for target_id in ['robotlink', 'botlink']:
+        m = re.search(r"document\.getElementById\(['\"]" + target_id + r"['\"]\)\.innerHTML\s*=\s*['\"]([^'\"]+)['\"]\s*\+\s*\(['\"]([^'\"]+)['\"]\)\.substring\((\d+)\)(?:\.substring\((\d+)\))?", html)
+        if m:
+            try:
+                base = m.group(1)
+                token_str = m.group(2)
+                s1 = int(m.group(3))
+                s2 = int(m.group(4)) if m.group(4) else 0
+                token_clean = token_str[s1:][s2:]
+                full = base + token_clean
+                if full.startswith('//'): full = 'https:' + full
+                full = re.sub(r'streamtape\.[a-z0-9]+', 'streamtape.com', full)
+                if '&stream=1' not in full:
+                    full += '&stream=1'
+                return full
+            except Exception:
+                pass
     return None
 
 def extract():
@@ -1058,6 +1090,36 @@ def extract():
                         idx = int(episode_num) - 1
                         if 0 <= idx < len(c_data.get("episodes", [])):
                             ep_url = c_data["episodes"][idx]
+                except Exception:
+                    pass
+            if not ep_url:
+                try:
+                    req_url = anime_url.rstrip('/') + '/?s='
+                    r_ao = c_requests.get(req_url, impersonate="chrome124", timeout=10)
+                    if r_ao.status_code == 200:
+                        ep_list = []
+                        if BeautifulSoup:
+                            soup = BeautifulSoup(r_ao.text, 'html.parser')
+                            for li in soup.select('ul.episodios li, .episodios li'):
+                                a = li.find('a', href=True)
+                                if not a or '/episodio/' not in a['href']:
+                                    continue
+                                num = li.select_one('.numerando')
+                                num_txt = num.get_text(strip=True) if num else ''
+                                if re.search(r'-\s*0$', num_txt) or num_txt == '0':
+                                    continue
+                                if a['href'] not in ep_list:
+                                    ep_list.append(a['href'])
+                        if not ep_list:
+                            for href in re.findall(r'href=["\'](https?://[^"\']+/episodio/[^"\']+)["\']', r_ao.text):
+                                if not re.search(r'-0/?$', href) and href not in ep_list:
+                                    ep_list.append(href)
+                        if ep_list:
+                            with open(cache_file, "w", encoding="utf-8") as f:
+                                json.dump({"url": anime_url, "episodes": ep_list}, f)
+                            idx = int(episode_num) - 1
+                            if 0 <= idx < len(ep_list):
+                                ep_url = ep_list[idx]
                 except Exception:
                     pass
             if not ep_url:
@@ -1113,11 +1175,11 @@ def extract():
                                     def ao_srv_score(u):
                                         ul = u.lower()
                                         if 'streamtape' in ul: return 0
-                                        if 'streamwish' in ul or 'swdyu' in ul: return 1
+                                        if 'mp4upload' in ul: return 1
                                         if 'yourupload' in ul: return 2
                                         if 'voe' in ul: return 3
-                                        if 'mp4upload' in ul: return 4
-                                        if 'filemoon' in ul: return 5
+                                        if any(k in ul for k in ['streamwish', 'swdyu', 'sfastwish', 'wishfast', 'wishembed', 'strwish']): return 4
+                                        if 'filemoon' in ul or 'filemooon' in ul: return 5
                                         return 10
                                     links.sort(key=ao_srv_score)
 
@@ -1126,25 +1188,25 @@ def extract():
                                             try:
                                                 r_st = c_requests.get(s_url, headers={'Referer': 'https://saidochesto.top/'}, impersonate="chrome124", timeout=6)
                                                 direct = extract_streamtape(r_st.text)
-                                                if direct:
+                                                if direct and verify_stream(direct, 'https://streamtape.com/'):
                                                     return direct, lang_label, 'https://streamtape.com/'
                                             except Exception: pass
-                                        elif any(k in s_url.lower() for k in ['streamwish', 'swdyu', 'sfastwish', 'wishfast', 'wishembed']):
+                                        elif any(k in s_url.lower() for k in ['streamwish', 'swdyu', 'sfastwish', 'wishfast', 'wishembed', 'strwish']):
                                             try:
                                                 r_sw = c_requests.get(s_url, headers={'Referer': 'https://saidochesto.top/'}, impersonate="chrome124", timeout=6)
                                                 m3u8 = unpack_streamwish(r_sw.text)
-                                                if m3u8:
+                                                if m3u8 and verify_stream(m3u8, s_url):
                                                     return m3u8, lang_label, s_url
                                             except Exception: pass
                                         else:
                                             d_url, d_ref = resolve_direct_stream(s_url, referer='https://saidochesto.top/')
-                                            if d_url:
+                                            if d_url and verify_stream(d_url, d_ref or 'https://saidochesto.top/'):
                                                 return d_url, lang_label, (d_ref or 'https://saidochesto.top/')
                             except Exception:
                                 pass
                         else:
                             d_url, d_ref = resolve_direct_stream(emb, referer=ep_url)
-                            if d_url:
+                            if d_url and verify_stream(d_url, d_ref or ep_url):
                                 return d_url, "sub", (d_ref or ep_url)
             except Exception:
                 pass
@@ -1370,10 +1432,16 @@ try:
         cursor.execute("PRAGMA table_info(animes)")
         cols = [c[1] for c in cursor.fetchall()]
         if 'url' in cols and 'provider' in cols:
-            cursor.execute("SELECT anime, url, provider, last_cap, progress FROM animes ORDER BY id DESC LIMIT 1")
-            row = cursor.fetchone()
-            if row:
-                print(f"{row[0]}|{row[1]}|{row[2]}|{row[3]}|{row[4]}")
+            if 'servers_data' in cols:
+                cursor.execute("SELECT anime, url, provider, last_cap, progress, servers_data FROM animes ORDER BY id DESC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    print(f"{row[0]}|{row[1]}|{row[2]}|{row[3]}|{row[4]}|{row[5] or ''}")
+            else:
+                cursor.execute("SELECT anime, url, provider, last_cap, progress FROM animes ORDER BY id DESC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    print(f"{row[0]}|{row[1]}|{row[2]}|{row[3]}|{row[4]}|")
 except Exception:
     pass
 END_CONT
@@ -1384,6 +1452,7 @@ END_CONT
             provider=$(echo "$last_entry" | cut -d'|' -f3)
             capi=$(echo "$last_entry" | cut -d'|' -f4)
             progress=$(echo "$last_entry" | cut -d'|' -f5)
+            servers_data=$(echo "$last_entry" | cut -d'|' -f6)
 
             if [ -z "$progress" ]; then progress="00:00:00"; fi
             if [ -n "$titulo_elegido" ] && [ -n "$nuevaurl" ]; then
@@ -1654,19 +1723,27 @@ END_CONT
         fi
         local ua_opt='--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 
+        local mpv_log
+        mpv_log=$(mktemp 2>/dev/null || echo "$HOME/.anime/mpv_run.log")
+        local mpv_exit=0
+
         case "$ENV" in
-            wsl|windows)
+            wsl|windows|linux)
                 local mpv_bin
                 mpv_bin=$(find_mpv_cmd)
                 if [ -n "$mpv_bin" ]; then
                     local t_start
                     t_start=$(date +%s 2>/dev/null || echo 0)
-                    pos=$("$mpv_bin" $ref_opt "$ua_opt" --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" 2>&1 | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g')
+
+                    "$mpv_bin" $ref_opt "$ua_opt" --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" > "$mpv_log" 2>&1
+                    mpv_exit=$?
+
+                    pos=$(grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' "$mpv_log" | tail -n 1 | sed 's/AV: //g')
                     local t_end
                     t_end=$(date +%s 2>/dev/null || echo 0)
                     local t_elapsed=$((t_end - t_start))
 
-                    if [ $t_elapsed -lt 2 ] && [ -z "$pos" ]; then
+                    if [ $mpv_exit -ne 0 ] || ( [ -z "$pos" ] && [ $t_elapsed -lt 15 ] ); then
                         echo -e "${YELLOW}[!] La transmisión falló o el enlace fue rechazado por el servidor.${NC}"
                         if [[ "$servers_data" == *"@@@"* ]]; then
                             echo -e "${YELLOW}[~] Probando failover automático con servidor alternativo...${NC}"
@@ -1679,17 +1756,122 @@ END_CONT
                                 alt_name=$(echo "$s_entry" | cut -d"|" -f2)
                                 alt_href=$(echo "$s_entry" | cut -d"|" -f3-)
                                 if [ "$alt_id" != "$provider" ]; then
-                                    provider="$alt_id"
-                                    nuevaurl="$alt_href"
-                                    play_episode "$ep_num"
-                                    return
+                                    echo -e "${YELLOW}[~] Probando failover con: ${BOLD}${alt_name}${NC}..."
+                                    local alt_extract alt_src
+                                    alt_extract=$(extract_stream "$alt_href" "$alt_id" "$ep_num" "$AUDIO_PREF")
+                                    alt_src=$(echo "$alt_extract" | cut -d'|' -f1)
+                                    if [ -n "$alt_src" ]; then
+                                        echo -e "${GREEN}[✔] ¡Transmisión obtenida con éxito desde ${alt_name}!${NC}"
+                                        provider="$alt_id"
+                                        nuevaurl="$alt_href"
+                                        src_contenido="$alt_src"
+                                        detected_lang=$(echo "$alt_extract" | cut -d'|' -f2)
+                                        stream_referer=$(echo "$alt_extract" | cut -d'|' -f3)
+                                        rm -f "$mpv_log" 2>/dev/null
+                                        play_episode "$ep_num"
+                                        return
+                                    fi
                                 fi
                             done <<< "$alt_entries"
                         fi
+
+                        echo ""
+                        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+                        echo -e "  ⚠️  ${RED}${BOLD}ERROR DE TRANSMISIÓN${NC}"
+                        echo -e "  El reproductor se cerró porque el enlace fue rechazado o expiró."
+                        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+                        rm -f "$mpv_log" 2>/dev/null
+
+                        local audio_toggle_err="🇯🇵 Cambiar a Subtitulado"
+                        if [ "$AUDIO_PREF" != "latino" ]; then
+                            audio_toggle_err="🔊 Cambiar a Audio Latino"
+                        fi
+
+                        local err_menu="🔄 Reintentar este capítulo\n$audio_toggle_err"
+                        if [[ "$servers_data" == *"@@@"* ]]; then
+                            err_menu+="\n🌐 Cambiar de servidor"
+                        fi
+                        err_menu+="\n🔍 Buscar otro anime\n❌ Salir"
+
+                        local err_op
+                        err_op=$(echo -e "$err_menu" | fzf \
+                            --prompt="👉 [ ¿QUÉ DESEAS HACER? ] > " \
+                            --height=15 \
+                            --border=rounded \
+                            --info=inline \
+                            --margin=1 \
+                            --layout=reverse \
+                            --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#00ff00,bg+:-1,hl+:#ffff00,pointer:#00ff00,info:#ffff00,prompt:#00ff00,header:#00ff00,marker:#00ff00,spinner:#00ff00)
+
+                        if [[ "$err_op" == *"Reintentar"* ]]; then
+                            play_episode "$ep_num"
+                            return
+                        elif [[ "$err_op" == *"Cambiar a"* ]]; then
+                            if [[ "$AUDIO_PREF" == "latino" ]]; then
+                                AUDIO_PREF="sub"
+                            else
+                                AUDIO_PREF="latino"
+                            fi
+                            play_episode "$ep_num"
+                            return
+                        elif [[ "$err_op" == *"Cambiar de servidor"* ]]; then
+                            local server_menu_lines=""
+                            local entries
+                            entries=$(echo "$servers_data" | sed "s/@@@/\n/g")
+                            while IFS= read -r s_entry; do
+                                [ -z "$s_entry" ] && continue
+                                local s_id s_name s_href
+                                s_id=$(echo "$s_entry" | cut -d"|" -f1)
+                                s_name=$(echo "$s_entry" | cut -d"|" -f2)
+                                s_href=$(echo "$s_entry" | cut -d"|" -f3-)
+
+                                local s_color="${MAGENTA}"
+                                if [ "$s_id" == "animeonline" ]; then s_color="\033[38;5;208m"; fi
+                                if [ "$s_id" == "tioanime" ]; then s_color="${MAGENTA}"; fi
+                                if [ "$s_id" == "jkanime" ]; then s_color="${GREEN}"; fi
+                                if [ "$s_id" == "monoschinos" ]; then s_color="${YELLOW}"; fi
+                                if [ "$s_id" == "animeflv" ]; then s_color="${RED}"; fi
+                                if [ "$s_id" == "tiohentai" ]; then s_color="\033[38;5;198m"; fi
+
+                                local cur_mark=""
+                                if [ "$s_id" == "$provider" ]; then cur_mark=" ${RED}(Falló)${NC}"; fi
+
+                                server_menu_lines+="${s_color}● ${s_name}${NC}${cur_mark}"$'\t'"${s_href}"$'\t'"${s_id}"$'\n'
+                            done <<< "$entries"
+                            server_menu_lines+="❌ Cancelar"$'\t'"none"$'\t'"cancel"
+
+                            chosen_server=$(echo -ne "$server_menu_lines" | fzf \
+                                --ansi \
+                                --delimiter=$'\t' \
+                                --with-nth=1 \
+                                --prompt="👉 [ CAMBIAR SERVIDOR ] > " \
+                                --height=~10 \
+                                --border=rounded \
+                                --info=inline \
+                                --margin=1 \
+                                --layout=reverse \
+                                --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#00ff00,bg+:-1,hl+:#ffff00,pointer:#00ff00,info:#ffff00,prompt:#00ff00,header:#00ff00,marker:#00ff00,spinner:#00ff00)
+
+                            if [ -n "$chosen_server" ] && [[ "$chosen_server" != *"cancel"* ]] && [[ "$chosen_server" != *"Cancelar"* ]]; then
+                                nuevaurl=$(echo "$chosen_server" | cut -f2)
+                                provider=$(echo "$chosen_server" | cut -f3)
+                            fi
+                            play_episode "$ep_num"
+                            return
+                        elif [[ "$err_op" == *"Buscar"* ]] || [[ -z "$err_op" ]]; then
+                            arg1=""
+                            main
+                            return
+                        elif [[ "$err_op" == *"Salir"* ]]; then
+                            clear
+                            exit 0
+                        fi
+                        return
                     fi
                 else
                     echo -e "${RED}mpv no encontrado en el sistema${NC}"
                 fi
+                rm -f "$mpv_log" 2>/dev/null
                 ;;
             termux)
                 if pm list packages | grep -q 'org.videolan.vlc'; then
@@ -1700,17 +1882,10 @@ END_CONT
                     pos=0
                 fi
                 ;;
-            linux)
-                local mpv_bin
-                mpv_bin=$(find_mpv_cmd)
-                if [ -n "$mpv_bin" ]; then
-                    pos=$("$mpv_bin" $ref_opt "$ua_opt" --cache=yes --demuxer-max-bytes=150M --demuxer-readahead-secs=300 --start=$progress -v --msg-level=ffmpeg=no --force-media-title="${title_prefix} ${clean_title} - Capítulo ${ep_num}" "$src_contenido" 2>&1 | grep -oE 'AV: [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -n 1 | sed 's/AV: //g')
-                fi
-                ;;
         esac
 
         # Actualizar historial SQLite
-        "$PY_CMD" - "$clean_title" "$nuevaurl" "$provider" "$ep_num" "$pos" <<'END_HIST'
+        "$PY_CMD" - "$clean_title" "$nuevaurl" "$provider" "$ep_num" "$pos" "$servers_data" <<'END_HIST'
 import sys, sqlite3, os
 try:
     anime = sys.argv[1]
@@ -1718,6 +1893,7 @@ try:
     provider = sys.argv[3]
     capi = sys.argv[4]
     progress = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "00:00:00"
+    servers_data = sys.argv[6] if len(sys.argv) > 6 else ""
 
     home_dir = os.path.expanduser("~")
     db_dir = os.path.join(home_dir, ".anime")
@@ -1726,7 +1902,7 @@ try:
 
     conect = sqlite3.connect(db_path)
     cursor = conect.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, anime TEXT, url TEXT, provider TEXT, last_cap TEXT, progress TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, anime TEXT, url TEXT, provider TEXT, last_cap TEXT, progress TEXT, servers_data TEXT)")
 
     cursor.execute("PRAGMA table_info(animes)")
     cols = [col[1] for col in cursor.fetchall()]
@@ -1736,15 +1912,17 @@ try:
         cursor.execute("ALTER TABLE animes ADD COLUMN provider TEXT")
     if "progress" not in cols:
         cursor.execute("ALTER TABLE animes ADD COLUMN progress TEXT DEFAULT '00:00:00'")
+    if "servers_data" not in cols:
+        cursor.execute("ALTER TABLE animes ADD COLUMN servers_data TEXT DEFAULT ''")
     conect.commit()
 
     cursor.execute('SELECT id FROM animes WHERE anime = ?', (anime,))
     row = cursor.fetchone()
 
     if row is None:
-        cursor.execute('INSERT INTO animes (anime, url, provider, last_cap, progress) VALUES (?, ?, ?, ?, ?)', (anime, url, provider, capi, progress))
+        cursor.execute('INSERT INTO animes (anime, url, provider, last_cap, progress, servers_data) VALUES (?, ?, ?, ?, ?, ?)', (anime, url, provider, capi, progress, servers_data))
     else:
-        cursor.execute("UPDATE animes SET url = ?, provider = ?, last_cap = ?, progress = ? WHERE anime = ?", (url, provider, capi, progress, anime))
+        cursor.execute("UPDATE animes SET url = ?, provider = ?, last_cap = ?, progress = ?, servers_data = ? WHERE anime = ?", (url, provider, capi, progress, servers_data, anime))
 
     conect.commit()
     conect.close()
