@@ -859,6 +859,7 @@ elif provider == 'animeonline':
     except ImportError:
         c_requests = None
     ep_urls = []
+    ep_items = []
     if '/pelicula/' in anime_url.lower():
         tipo = "Película"
     else:
@@ -872,20 +873,69 @@ elif provider == 'animeonline':
                 html_ao = r_ao.text
                 if BeautifulSoup:
                     soup = BeautifulSoup(html_ao, 'html.parser')
-                    for li in soup.select('ul.episodios li, .episodios li'):
-                        a = li.find('a', href=True)
-                        if not a or '/episodio/' not in a['href']:
-                            continue
-                        num = li.select_one('.numerando')
-                        num_txt = num.get_text(strip=True) if num else ''
-                        if re.search(r'-\s*0$', num_txt) or num_txt == '0':
-                            continue
-                        if a['href'] not in ep_urls:
-                            ep_urls.append(a['href'])
+                    se_blocks = soup.select('.se-c')
+                    if se_blocks:
+                        for s_idx, s in enumerate(se_blocks, 1):
+                            num_span = s.select_one('.se-t')
+                            s_num = num_span.get_text(strip=True) if num_span else str(s_idx)
+                            s_title = f"Temporada {s_num}"
+                            is_first = True
+                            for li in s.select('ul.episodios li, .episodios li'):
+                                a = li.find('a', href=True)
+                                if not a or '/episodio/' not in a['href']:
+                                    continue
+                                num = li.select_one('.numerando')
+                                num_txt = num.get_text(strip=True) if num else ''
+                                if re.search(r'-\s*0$', num_txt) or num_txt == '0':
+                                    continue
+                                title_el = li.select_one('.episodiotitle a, .episodiotitle')
+                                title_txt = title_el.get_text(strip=True) if title_el else ''
+                                title_txt = re.sub(r'[A-Za-z]{3,}\.?\s+\d{1,2},\s+\d{4}$', '', title_txt).strip()
+                                href = a['href']
+                                ep_urls.append(href)
+                                ep_items.append({
+                                    'num': len(ep_urls),
+                                    'season': s_title,
+                                    'season_start': is_first,
+                                    'tag': num_txt,
+                                    'title': title_txt or f"Episodio {len(ep_urls)}",
+                                    'url': href
+                                })
+                                is_first = False
+                    else:
+                        for li in soup.select('ul.episodios li, .episodios li'):
+                            a = li.find('a', href=True)
+                            if not a or '/episodio/' not in a['href']:
+                                continue
+                            num = li.select_one('.numerando')
+                            num_txt = num.get_text(strip=True) if num else ''
+                            if re.search(r'-\s*0$', num_txt) or num_txt == '0':
+                                continue
+                            title_el = li.select_one('.episodiotitle a, .episodiotitle')
+                            title_txt = title_el.get_text(strip=True) if title_el else ''
+                            title_txt = re.sub(r'[A-Za-z]{3,}\.?\s+\d{1,2},\s+\d{4}$', '', title_txt).strip()
+                            href = a['href']
+                            ep_urls.append(href)
+                            ep_items.append({
+                                'num': len(ep_urls),
+                                'season': 'Temporada 1',
+                                'season_start': (len(ep_urls) == 1),
+                                'tag': num_txt,
+                                'title': title_txt or f"Episodio {len(ep_urls)}",
+                                'url': href
+                            })
                 if not ep_urls:
                     for href in re.findall(r'href=["\'](https?://[^"\']+/episodio/[^"\']+)["\']', html_ao):
                         if not re.search(r'-0/?$', href) and href not in ep_urls:
                             ep_urls.append(href)
+                            ep_items.append({
+                                'num': len(ep_urls),
+                                'season': 'Temporada 1',
+                                'season_start': (len(ep_urls) == 1),
+                                'tag': f"1 - {len(ep_urls)}",
+                                'title': f"Episodio {len(ep_urls)}",
+                                'url': href
+                            })
         except Exception:
             pass
     if ep_urls:
@@ -894,7 +944,7 @@ elif provider == 'animeonline':
         cache_dir = os.path.expanduser("~/.anime")
         os.makedirs(cache_dir, exist_ok=True)
         with open(os.path.join(cache_dir, "ao_eps.json"), "w", encoding="utf-8") as f:
-            json.dump({"url": anime_url, "episodes": ep_urls}, f)
+            json.dump({"url": anime_url, "episodes": ep_urls, "items": ep_items}, f, ensure_ascii=False)
     else:
         total_episodes = 1
     tipo = tipo if tipo != "Serie" else "Anime Online"
@@ -1599,15 +1649,82 @@ END_CONT
         num_episodios=1
     fi
 
+    choose_episode() {
+        local ep_menu_list
+        ep_menu_list=$("$PY_CMD" - "$nuevaurl" "$provider" "$num_episodios" <<'END_EPMENU'
+import sys, os, json, re
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+anime_url = sys.argv[1] if len(sys.argv) > 1 else ""
+provider = sys.argv[2] if len(sys.argv) > 2 else ""
+try:
+    total_eps = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+except Exception:
+    total_eps = 1
+
+C_PINK = "\033[38;5;198m\033[1m"
+C_CYAN = "\033[36m"
+C_WHITE = "\033[1;37m"
+C_GRAY = "\033[90m"
+C_RESET = "\033[0m"
+C_GREEN = "\033[1;32m"
+C_YELLOW = "\033[33m"
+
+cache_file = os.path.expanduser("~/.anime/ao_eps.json")
+items = []
+if provider == 'animeonline' and os.path.exists(cache_file):
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("url") == anime_url:
+            items = data.get("items", [])
+    except Exception:
+        items = []
+
+if items:
+    for it in items:
+        if it.get("season_start"):
+            s_name = it.get("season", "Temporada")
+            print(f"{C_PINK}══════════════════════════ [ 🌸 {s_name.upper()} ] ══════════════════════════{C_RESET}\t{it['num']}")
+        num_str = f"{it['num']:2d}"
+        tag_str = f"{it.get('tag', ''):6s}"
+        title_str = it.get('title', '')
+        tag_color = C_YELLOW if 'especial' in title_str.lower() or 'special' in title_str.lower() else C_CYAN
+        print(f"  {C_GREEN}{num_str}{C_RESET}  {C_GRAY}●{C_RESET}  {tag_color}{tag_str}{C_RESET}  {C_WHITE}{title_str}{C_RESET}\t{it['num']}")
+else:
+    for i in range(1, total_eps + 1):
+        print(f"  {C_GREEN}{i:2d}{C_RESET}  {C_GRAY}●{C_RESET}  {C_WHITE}Capítulo {i}{C_RESET}\t{i}")
+END_EPMENU
+)
+
+        local chosen_ep
+        chosen_ep=$(echo -e "$ep_menu_list" | fzf \
+            --ansi \
+            --delimiter=$'\t' \
+            --with-nth=1 \
+            --prompt="👉 [ SELECCIONA UN EPISODIO ] > " \
+            --height=~30 \
+            --border=rounded \
+            --layout=reverse \
+            --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#00ff00,bg+:-1,hl+:#ffff00,pointer:#00ff00,info:#ffff00,prompt:#00ff00,header:#00ff00,marker:#00ff00,spinner:#00ff00)
+
+        if [ -z "$chosen_ep" ]; then
+            echo ""
+            return
+        fi
+
+        local sel_capi
+        sel_capi=$(echo "$chosen_ep" | cut -f2)
+        if [ -z "$sel_capi" ]; then
+            sel_capi="1"
+        fi
+        echo "$sel_capi"
+    }
+
     clear
     echo -e "${GREEN}[+] ANIME:${NC} ${WHITE}${clean_title}${NC} (${num_episodios} episodios - ${tipo})"
-    capi=$(seq 1 "$num_episodios" | fzf \
-        --prompt="👉 [ SELECCIONA UN EPISODIO ] > " \
-        --height=~30 \
-        --border=rounded \
-        --reverse \
-        --layout=reverse \
-        --color=fg:#d0d0d0,bg:-1,hl:#00ff00,fg+:#00ff00,bg+:-1,hl+:#ffff00,pointer:#00ff00,info:#ffff00,prompt:#00ff00,header:#00ff00,marker:#00ff00,spinner:#00ff00)
+    capi=$(choose_episode)
 
     # Manejo de tecla ESC al elegir episodio
     if [ -z "$capi" ]; then
@@ -1787,7 +1904,7 @@ END_CONT
                             audio_toggle_err="🔊 Cambiar a Audio Latino"
                         fi
 
-                        local err_menu="🔄 Reintentar este capítulo\n$audio_toggle_err"
+                        local err_menu="🔄 Reintentar este capítulo\n📋 Lista de episodios\n$audio_toggle_err"
                         if [[ "$servers_data" == *"@@@"* ]]; then
                             err_menu+="\n🌐 Cambiar de servidor"
                         fi
@@ -1805,6 +1922,16 @@ END_CONT
 
                         if [[ "$err_op" == *"Reintentar"* ]]; then
                             play_episode "$ep_num"
+                            return
+                        elif [[ "$err_op" == *"Lista de episodios"* ]]; then
+                            local next_capi
+                            next_capi=$(choose_episode)
+                            if [ -n "$next_capi" ]; then
+                                progress="00:00:00"
+                                play_episode "$next_capi"
+                            else
+                                play_episode "$ep_num"
+                            fi
                             return
                         elif [[ "$err_op" == *"Cambiar a"* ]]; then
                             if [[ "$AUDIO_PREF" == "latino" ]]; then
@@ -1935,7 +2062,7 @@ END_HIST
             audio_toggle_label="🔊 Cambiar a Audio Latino"
         fi
 
-        local menu_options="▶ Siguiente capítulo\n◀ Capítulo anterior\n$audio_toggle_label"
+        local menu_options="▶ Siguiente capítulo\n◀ Capítulo anterior\n📋 Lista de episodios\n$audio_toggle_label"
         if [[ "$servers_data" == *"@@@"* ]]; then
             menu_options+="\n🌐 Cambiar de servidor"
         fi
@@ -1960,6 +2087,16 @@ END_HIST
             else
                 play_episode 1
             fi
+        elif [[ "$op" == *"Lista de episodios"* ]]; then
+            progress="00:00:00"
+            local next_capi
+            next_capi=$(choose_episode)
+            if [ -n "$next_capi" ]; then
+                play_episode "$next_capi"
+            else
+                play_episode "$ep_num"
+            fi
+            return
         elif [[ "$op" == *"Cambiar a"* ]]; then
             if [[ "$AUDIO_PREF" == "latino" ]]; then
                 AUDIO_PREF="sub"
