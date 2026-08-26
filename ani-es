@@ -6,6 +6,9 @@ CONTINUE=0
 AUDIO_PREF="latino"
 progress="00:00:00"
 
+export PYTHONIOENCODING="utf-8"
+export LC_ALL="C.UTF-8"
+
 # Colores de texto ANSI
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -24,11 +27,12 @@ show_help() {
     echo -e "    ${CYAN}${BOLD}Opciones:${NC}"
     echo "      -s, --sub        Forzar versión en japonés subtitulada [SUB]"
     echo "      -c, --continue   Continuar el anime en el último capítulo y minuto visto"
+    echo "      -u, --update     Actualizar Anime-CMD a la última versión"
     echo "      -h, --help       Mostrar esta ayuda"
     echo "      -v, --version    Mostrar versión instalada"
     echo ""
     echo -e "    ${YELLOW}${BOLD}Características del motor v2.1:${NC}"
-    echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (TioAnime, MonosChinos, JKAnime, AnimeFLV)."
+    echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (TioAnime, MonosChinos, JKAnime)."
     echo -e "      • ${GREEN}Prioridad Audio Latino:${NC} Reproduce por defecto doblaje latino con failover a subtitulado."
     echo -e "      • ${GREEN}Detección Inteligente:${NC} Detecta servidores dual-audio y enlaces alternativos de doblaje."
     echo ""
@@ -36,6 +40,67 @@ show_help() {
 
 show_version() {
     echo -e "Anime-CMD ${PURPLE}v${VERSION}${NC} - Motor Agregador Multi-Plataforma"
+}
+
+update_anime() {
+    echo ""
+    echo -e "${CYAN}==========================================================${NC}"
+    echo -e "${GREEN}         🔄 Actualizando Anime-CMD a la última versión     ${NC}"
+    echo -e "${CYAN}==========================================================${NC}"
+    echo ""
+
+    local REPO_URL="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
+    local CACHE_BUST
+    CACHE_BUST=$(date +%s 2>/dev/null || echo "1")
+    
+    local TARGET_FILE="$0"
+    if command -v cygpath >/dev/null 2>&1; then
+        TARGET_FILE="$(cygpath -u "$0" 2>/dev/null || echo "$0")"
+    fi
+    if [ ! -f "$TARGET_FILE" ]; then
+        if [ -f "$HOME/.anime/ani-es" ]; then
+            TARGET_FILE="$HOME/.anime/ani-es"
+        elif command -v anime >/dev/null 2>&1; then
+            TARGET_FILE="$(command -v anime)"
+        elif command -v ani-es >/dev/null 2>&1; then
+            TARGET_FILE="$(command -v ani-es)"
+        fi
+    fi
+
+    echo -e "${CYAN}[*] Descargando última versión de Anime-CMD...${NC}"
+    local TMP_FILE="${TARGET_FILE}.tmp"
+    
+    local DOWNLOAD_OK=0
+    if command -v curl >/dev/null 2>&1; then
+        if curl -sSL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "${REPO_URL}/ani-es?v=${CACHE_BUST}" -o "$TMP_FILE"; then
+            DOWNLOAD_OK=1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if wget --no-cache -qO "$TMP_FILE" "${REPO_URL}/ani-es?v=${CACHE_BUST}"; then
+            DOWNLOAD_OK=1
+        fi
+    fi
+
+    if [ "$DOWNLOAD_OK" -eq 1 ] && [ -s "$TMP_FILE" ]; then
+        if grep -q 'VERSION=' "$TMP_FILE"; then
+            local NEW_VERSION
+            NEW_VERSION=$(grep -m 1 'VERSION=' "$TMP_FILE" | cut -d '"' -f 2)
+            cp -f "$TMP_FILE" "$TARGET_FILE" 2>/dev/null || mv -f "$TMP_FILE" "$TARGET_FILE"
+            chmod +x "$TARGET_FILE" 2>/dev/null || true
+            rm -f "$TMP_FILE" 2>/dev/null || true
+            echo -e "${GREEN}[✔] ¡Anime-CMD actualizado exitosamente a la versión ${BOLD}v${NEW_VERSION}${NC}${GREEN}!${NC}"
+            echo ""
+            exit 0
+        else
+            rm -f "$TMP_FILE" 2>/dev/null || true
+            echo -e "${RED}[ERROR] La descarga no contiene una versión válida de Anime-CMD.${NC}"
+            exit 1
+        fi
+    else
+        rm -f "$TMP_FILE" 2>/dev/null || true
+        echo -e "${RED}[ERROR] No se pudo conectar con el repositorio para actualizar.${NC}"
+        exit 1
+    fi
 }
 
 # Parseo de argumentos
@@ -47,6 +112,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -v|--version)
             show_version
+            exit 0
+            ;;
+        -u|-U|--update)
+            update_anime
             exit 0
             ;;
         -c|--continue)
@@ -329,12 +398,11 @@ force_sub = sys.argv[2] == "sub"
 sys.stderr.write(f"\033[0;36m[~] Consultando servidores multi-plataforma para '{query}'...\033[0m\n")
 
 all_results = []
-with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     futures = {
         executor.submit(search_tioanime, query): 'TioAnime',
         executor.submit(search_jkanime, query): 'JKAnime',
         executor.submit(search_monoschinos, query): 'MonosChinos',
-        executor.submit(search_animeflv, query): 'AnimeFLV',
     }
     for future in concurrent.futures.as_completed(futures):
         prov = futures[future]
@@ -345,32 +413,59 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         except Exception:
             sys.stderr.write(f"  \033[0;31m✖ {prov:<12}\033[0m (Error de conexión)\n")
 
+def normalize_clean(txt):
+    t = txt.lower()
+    t = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', t)
+    t = re.sub(r'[^a-z0-9\s]', ' ', t)
+    return ' '.join(t.split())
+
+clean_q = normalize_clean(query)
+q_words = [w for w in clean_q.split() if len(w) > 1]
+
 seen_keys = set()
 deduped = []
 for item in all_results:
     tag, prov, title, href, p_id = item
-    key = (title.lower(), p_id)
+    key = (title.lower().strip(), p_id)
     if key not in seen_keys:
         seen_keys.add(key)
         deduped.append(item)
 
-if force_sub:
-    def sort_key(item):
-        tag, prov, title, href, p_id = item
-        prio = 0 if 'SUB' in tag else (1 if 'LAT' in tag else 2)
-        return (prio, title)
-else:
-    def sort_key(item):
-        tag, prov, title, href, p_id = item
-        prio = 0 if 'LAT' in tag else (1 if 'CAST' in tag else 2)
-        return (prio, title)
+def score_item(item):
+    tag, prov, title, href, p_id = item
+    norm_title = normalize_clean(title)
+    
+    # 1. Calidad y exactitud de coincidencia con la búsqueda
+    if norm_title == clean_q:
+        match_tier = 0
+    elif norm_title.startswith(clean_q + ' ') or norm_title.startswith(clean_q):
+        match_tier = 1
+    elif all(w in norm_title for w in q_words) if q_words else False:
+        match_tier = 2
+    elif any(w in norm_title for w in q_words) if q_words else False:
+        match_tier = 3
+    else:
+        match_tier = 4
 
-deduped.sort(key=sort_key)
+    # 2. Prioridad de audio (Audio Latino por defecto al principio)
+    if force_sub:
+        audio_prio = 0 if 'SUB' in tag else (1 if 'LAT' in tag else 2)
+    else:
+        audio_prio = 0 if 'LAT' in tag else (1 if 'SUB' in tag else 2)
+
+    # 3. Proveedor preferido
+    prov_prio = {'tioanime': 0, 'jkanime': 1, 'monoschinos': 2}.get(p_id, 3)
+
+    return (match_tier, norm_title, audio_prio, prov_prio)
+
+deduped.sort(key=score_item)
 lat_count = sum(1 for item in deduped if 'LAT' in item[0])
 sys.stderr.write(f"\033[0;32m[+] Total:\033[0m {len(deduped)} animes encontrados ({lat_count} con Audio Latino 🔊)\n\n")
 
 for tag, prov, title, href, p_id in deduped:
-    print(f"{tag} {prov:<13} {title}|{href}|{p_id}")
+    tag_aligned = "🔊 [LAT] " if "LAT" in tag else ("🇯🇵 [SUB] " if "SUB" in tag else "🇪🇸 [CAST]")
+    clean_title = ' '.join(title.strip().split())
+    print(f"{tag_aligned} {prov:<13} {clean_title}|{href}|{p_id}")
 END_SEARCH
 }
 
@@ -794,10 +889,12 @@ END_CONT
         echo -e "  🔊 Modo por defecto: ${GREEN}Prioridad Audio Latino [LAT]${NC}"
         echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
         echo ""
-        local prompt_str=$'\001\033[0;32m\002👉 [ BUSCAR ANIME ] > \001\033[0m\002'
-        read -r -p "$prompt_str" search_term
+        echo -ne "${GREEN}${BOLD}👉 [ BUSCAR ANIME ] > ${NC}"
+        read -e -r search_term
         clear
     fi
+
+    search_term="$(echo "$search_term" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
     if [[ -z "$search_term" ]]; then
         exit 0
@@ -809,7 +906,7 @@ END_CONT
 
     if [[ -z "$resultados" ]]; then
         echo -e "${RED}[-] No se encontraron resultados para '${search_term}' en ninguna plataforma.${NC}"
-        read -p "Presiona ENTER para volver a buscar..." dummy
+        read -r -p "Presiona ENTER para volver a buscar..." dummy
         arg1=""
         main
         return
@@ -819,7 +916,7 @@ END_CONT
     if [[ "$num_animes" == "1" ]]; then
         opcion="$resultados"
     else
-        opcion=$( (echo "$resultados"; echo "❌ Salir|Salir|none") | tac | fzf \
+        opcion=$( (echo "$resultados"; echo "❌ Salir|Salir|none") | fzf \
             --delimiter='\|' \
             --with-nth=1 \
             --prompt="👉 [ SELECCIONA UN ANIME ] > " \
@@ -899,7 +996,7 @@ END_CONT
 
         if [ -z "$src_contenido" ]; then
             echo -e "${RED}[-] No se pudo extraer la transmisión para el capítulo $ep_num en $provider.${NC}"
-            read -p "Presiona ENTER para volver al menú..." dummy
+            read -r -p "Presiona ENTER para volver al menú..." dummy
             arg1=""
             main
             return

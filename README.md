@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Plataforma-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20(Termux)-green.svg)]()
 [![Shell](https://img.shields.io/badge/CLI-Bash%20%2B%20Python-orange.svg)]()
-[![Providers](https://img.shields.io/badge/Fuentes-TioAnime%20%7C%20MonosChinos%20%7C%20JKAnime%20%7C%20AnimeFLV-blueviolet.svg)]()
+[![Providers](https://img.shields.io/badge/Fuentes-TioAnime%20%7C%20MonosChinos%20%7C%20JKAnime-blueviolet.svg)]()
 
 </div>
 
@@ -15,18 +15,17 @@
 
 ## ⚡ Características Principales
 
-- 🌐 **Motor Agregador Multi-Plataforma:** Escaneo concurrente y paralelo en milisegundos a través de las principales bibliotecas de anime:
+- 🌐 **Motor Agregador Multi-Plataforma:** Escaneo concurrente y paralelo en milisegundos a través de las principales bibliotecas de anime activas:
   - 🟣 **TioAnime**
   - 🔵 **MonosChinos**
   - 🟢 **JKAnime**
-  - 🟠 **AnimeFLV**
+  - *(AnimeFLV desactivado temporalmente por inestabilidad de sus servidores)*
 - 🔊 **Prioridad Absoluta en Audio Latino (`[LAT]`):** El algoritmo clasifica automáticamente todas las fuentes priorizando doblaje latino (`[LAT]`), seguido de castellano (`[CAST]`), y con fallback automático a subtitulado en japonés (`[SUB]`).
-- 🏷️ **Etiquetado Visual de Fuente y Audio:** Identifica al instante el proveedor y el tipo de audio en el menú de FZF:
+- 🏷️ **Etiquetado Visual de Fuente y Audio:** Identifica al instante el proveedor y el tipo de audio en el menú de FZF con alineación perfecta:
   ```text
-  [LAT] [TioAnime]     Dragon Ball Super Latino
-  [LAT] [AnimeFLV]     Dragon Ball Super Latino
-  [SUB] [MonosChinos]  Dragon Ball Super
-  [SUB] [JKAnime]      Dragon Ball Super
+  🔊 [LAT]   [TioAnime]     Dragon Ball Super Latino
+  🇯🇵 [SUB]   [JKAnime]      Dragon Ball Super
+  🇯🇵 [SUB]   [MonosChinos]  Dragon Ball Super
   ```
 - 🚀 **Extractor Universal Multi-Servidor:** Resuelve y reproduce automáticamente enlaces directos y streams HLS de **Mediafire**, **YourUpload**, **Mp4upload**, **Voe.sx**, **Streamwish**, **Filemoon**, **JKPlayer (M3U8)**, **Ok.ru**, **Mega** y más con **failover automático** si algún servidor está caído.
 - 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector numérico de episodios y menú contextual post-reproducción (Siguiente capítulo, Retroceder o Cambiar Audio).
@@ -76,6 +75,11 @@ anime -c
 # Ver ayuda y versión instalada
 anime --help
 anime --version
+
+# Actualizar Anime-CMD a la última versión
+anime --update
+# o también:
+anime -u
 ```
 
 ---

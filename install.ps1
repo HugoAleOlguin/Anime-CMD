@@ -16,21 +16,28 @@ Write-Host ""
 $installDir = "$HOME\.anime"
 
 # ------------------------------------------------------------------------------
-# 1. Limpieza de instalaciones anteriores
+# 1. Limpieza de instalaciones anteriores y conflictos
 # ------------------------------------------------------------------------------
 Write-Host "[1/5] Limpiando versiones y archivos temporales anteriores..." -ForegroundColor Cyan
 
 $oldPaths = @(
     "$HOME\ani-es",
     "$HOME\.anime-cmd",
-    "$HOME\AppData\Local\ani-es"
+    "$HOME\AppData\Local\ani-es",
+    "$HOME\scoop\apps\ani-es",
+    "$HOME\scoop\shims\anime.cmd",
+    "$HOME\scoop\shims\anime",
+    "$HOME\scoop\shims\ani-es.cmd",
+    "$HOME\scoop\shims\ani-es",
+    "$HOME\.local\bin\anime",
+    "$HOME\.local\bin\ani-es"
 )
 
 foreach ($old in $oldPaths) {
     if (Test-Path $old) {
         try {
             Remove-Item -Path $old -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "  -> Carpeta previa eliminada: $old" -ForegroundColor Gray
+            Write-Host "  -> Elemento previo eliminado: $old" -ForegroundColor Gray
         } catch {
         }
     }
@@ -254,18 +261,22 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
 Write-Host ""
 Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Cyan
 
-$cacheBust = Get-Random
+$cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $repoUrl = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
 $aniScriptUrl = "$repoUrl/ani-es?v=$cacheBust"
 $aniScriptPath = "$installDir\ani-es"
 
 try {
-    Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{
+        "Cache-Control" = "no-cache, no-store, must-revalidate"
+        "Pragma"        = "no-cache"
+    }
     Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
 } catch {
     Write-Host "  [!] Reintentando descarga con WebClient..." -ForegroundColor Yellow
     $webClient = New-Object System.Net.WebClient
-    $webClient.Headers.Add("Cache-Control", "no-cache")
+    $webClient.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
+    $webClient.Headers.Add("Pragma", "no-cache")
     $webClient.DownloadFile($aniScriptUrl, $aniScriptPath)
     Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
 }
@@ -297,30 +308,37 @@ $cmdLines = @(
 Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 6. Configurar variable de entorno PATH
+# 6. Configurar variable de entorno PATH con maxima prioridad
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[5/5] Configurando variables de entorno..." -ForegroundColor Cyan
+Write-Host "[5/5] Configurando variables de entorno con maxima prioridad..." -ForegroundColor Cyan
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($null -eq $userPath) { $userPath = "" }
 
-$pathsToAdd = @($installDir)
-$wingetLinks = "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
-if (Test-Path $wingetLinks) { $pathsToAdd += $wingetLinks }
-$scoopShims = "$HOME\scoop\shims"
-if (Test-Path $scoopShims) { $pathsToAdd += $scoopShims }
+# Extraer y filtrar entradas existentes para evitar duplicados y asegurar prioridad maxima a $installDir
+$existingParts = ($userPath -split ';') | Where-Object { $_ -ne "" -and $_.Trim() -ne $installDir }
 
-foreach ($p in $pathsToAdd) {
-    if ($userPath -notlike "*$p*") {
-        $userPath = if ($userPath -eq "") { $p } else { "$userPath;$p" }
-        [Environment]::SetEnvironmentVariable("Path", $userPath, "User")
-        $env:Path += ";$p"
-        Write-Host "  [OK] $p anadido a tu variable PATH." -ForegroundColor Green
-    }
+# Construir lista priorizada: $installDir siempre al principio
+$finalPaths = @($installDir)
+$wingetLinks = "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
+if (Test-Path $wingetLinks) {
+    $existingParts = $existingParts | Where-Object { $_.Trim() -ne $wingetLinks }
+    $finalPaths += $wingetLinks
+}
+$scoopShims = "$HOME\scoop\shims"
+if (Test-Path $scoopShims) {
+    $existingParts = $existingParts | Where-Object { $_.Trim() -ne $scoopShims }
+    $finalPaths += $scoopShims
 }
 
-Write-Host "  [OK] Variables de entorno configuradas correctamente." -ForegroundColor Green
+$finalPaths += $existingParts
+$newUserPath = ($finalPaths -join ';')
+
+[Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+$env:Path = "$installDir;" + $env:Path
+
+Write-Host "  [OK] $installDir configurado con maxima prioridad en PATH." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
