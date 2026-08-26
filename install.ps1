@@ -8,9 +8,9 @@ $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 Write-Host ""
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "         Instalador Automatico de Anime-CMD v2.1          " -ForegroundColor Green
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 
 $installDir = "$HOME\.anime"
@@ -18,7 +18,7 @@ $installDir = "$HOME\.anime"
 # ------------------------------------------------------------------------------
 # 1. Limpieza de instalaciones anteriores y conflictos
 # ------------------------------------------------------------------------------
-Write-Host "[1/5] Limpiando versiones y archivos temporales anteriores..." -ForegroundColor Cyan
+Write-Host "[1/5] Limpiando versiones y archivos temporales anteriores..." -ForegroundColor Green
 
 $oldPaths = @(
     "$HOME\ani-es",
@@ -55,74 +55,152 @@ if (!(Test-Path $installDir)) {
 Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 2. Funciones auxiliares de localizacion de ejecutables
+# 2. Funciones auxiliares de validación y localización de ejecutables
 # ------------------------------------------------------------------------------
+function Test-ExecutableWorks {
+    param([string]$exePath, [string]$testArg = "--version")
+    if (!$exePath -or !(Test-Path $exePath)) { return $false }
+    try {
+        $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+        $pinfo.FileName = $exePath
+        $pinfo.Arguments = $testArg
+        $pinfo.RedirectStandardOutput = $true
+        $pinfo.RedirectStandardError = $true
+        $pinfo.UseShellExecute = $false
+        $pinfo.CreateNoWindow = $true
+        $p = [System.Diagnostics.Process]::Start($pinfo)
+        $p.WaitForExit(3000)
+        if ($p.HasExited -and $p.ExitCode -eq 0) {
+            return $true
+        }
+    } catch {}
+    return $false
+}
+
+function Resolve-RealExe {
+    param([string]$exePath)
+    if (!$exePath -or !(Test-Path $exePath)) { return $null }
+
+    # 1. Si es un shim de Scoop (existe un archivo .shim hermano)
+    $shimFile = [System.IO.Path]::ChangeExtension($exePath, ".shim")
+    if (Test-Path $shimFile) {
+        try {
+            $content = Get-Content $shimFile -Raw
+            if ($content -match 'path\s*=\s*"([^"]+)"') {
+                $target = $matches[1]
+                if (Test-Path $target) {
+                    return $target
+                }
+            }
+        } catch {}
+    }
+
+    # 2. Si es un enlace simbólico o junction
+    try {
+        $item = Get-Item $exePath -ErrorAction SilentlyContinue
+        if ($item -and $item.LinkType -and $item.Target) {
+            $target = $item.Target
+            if (Test-Path $target) {
+                return $target
+            }
+        }
+    } catch {}
+
+    return $exePath
+}
+
+# Limpieza preventiva de binarios corruptos o shims huérfanos en $installDir
+if (Test-Path "$installDir\fzf.exe") {
+    if (!(Test-ExecutableWorks "$installDir\fzf.exe")) {
+        Remove-Item -Path "$installDir\fzf.exe" -Force -ErrorAction SilentlyContinue
+        Write-Host "  -> Shim/ejecutable fzf.exe inválido eliminado de $installDir" -ForegroundColor Gray
+    }
+}
+if (Test-Path "$installDir\mpv.exe") {
+    if (!(Test-ExecutableWorks "$installDir\mpv.exe")) {
+        Remove-Item -Path "$installDir\mpv.exe" -Force -ErrorAction SilentlyContinue
+        Write-Host "  -> Shim/ejecutable mpv.exe inválido eliminado de $installDir" -ForegroundColor Gray
+    }
+}
+
 function Find-MpvExe {
-    if (Get-Command mpv.exe -ErrorAction SilentlyContinue) {
-        return (Get-Command mpv.exe).Source
-    }
-    if (Get-Command mpv -ErrorAction SilentlyContinue) {
-        return (Get-Command mpv).Source
-    }
-    
     $searchLocations = @(
         "$installDir\mpv.exe",
+        "$HOME\scoop\apps\mpv\current\mpv.exe",
+        "$env:USERPROFILE\scoop\apps\mpv\current\mpv.exe",
         "$env:LOCALAPPDATA\Microsoft\WinGet\Links\mpv.exe",
         "$env:LOCALAPPDATA\Programs\mpv\mpv.exe",
         "C:\Program Files\mpv\mpv.exe",
         "C:\Program Files (x86)\mpv\mpv.exe",
         "$HOME\scoop\shims\mpv.exe",
-        "$HOME\scoop\apps\mpv\current\mpv.exe",
         "C:\ProgramData\chocolatey\bin\mpv.exe"
     )
-    
-    foreach ($loc in $searchLocations) {
-        if (Test-Path $loc) {
-            return $loc
-        }
+
+    if (Get-Command mpv.exe -ErrorAction SilentlyContinue) {
+        $searchLocations = @((Get-Command mpv.exe).Source) + $searchLocations
+    } elseif (Get-Command mpv -ErrorAction SilentlyContinue) {
+        $searchLocations = @((Get-Command mpv).Source) + $searchLocations
     }
-    
-    # Buscar recursivamente en WinGet Packages si existe
+
     $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     if (Test-Path $wingetPkg) {
         $found = Get-ChildItem -Path $wingetPkg -Filter "mpv.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
-            return $found.FullName
+            $searchLocations += $found.FullName
         }
     }
-    
+
+    foreach ($loc in $searchLocations) {
+        if ($loc -and (Test-Path $loc)) {
+            $real = Resolve-RealExe $loc
+            if (Test-ExecutableWorks $real) {
+                return $real
+            }
+            if (Test-ExecutableWorks $loc) {
+                return $loc
+            }
+        }
+    }
+
     return $null
 }
 
 function Find-FzfExe {
-    if (Get-Command fzf.exe -ErrorAction SilentlyContinue) {
-        return (Get-Command fzf.exe).Source
-    }
-    if (Get-Command fzf -ErrorAction SilentlyContinue) {
-        return (Get-Command fzf).Source
-    }
-    
     $searchLocations = @(
         "$installDir\fzf.exe",
+        "$HOME\scoop\apps\fzf\current\fzf.exe",
+        "$env:USERPROFILE\scoop\apps\fzf\current\fzf.exe",
         "$env:LOCALAPPDATA\Microsoft\WinGet\Links\fzf.exe",
         "$HOME\scoop\shims\fzf.exe",
         "C:\ProgramData\chocolatey\bin\fzf.exe"
     )
-    
-    foreach ($loc in $searchLocations) {
-        if (Test-Path $loc) {
-            return $loc
-        }
+
+    if (Get-Command fzf.exe -ErrorAction SilentlyContinue) {
+        $searchLocations = @((Get-Command fzf.exe).Source) + $searchLocations
+    } elseif (Get-Command fzf -ErrorAction SilentlyContinue) {
+        $searchLocations = @((Get-Command fzf).Source) + $searchLocations
     }
-    
+
     $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     if (Test-Path $wingetPkg) {
         $found = Get-ChildItem -Path $wingetPkg -Filter "fzf.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
-            return $found.FullName
+            $searchLocations += $found.FullName
         }
     }
-    
+
+    foreach ($loc in $searchLocations) {
+        if ($loc -and (Test-Path $loc)) {
+            $real = Resolve-RealExe $loc
+            if (Test-ExecutableWorks $real) {
+                return $real
+            }
+            if (Test-ExecutableWorks $loc) {
+                return $loc
+            }
+        }
+    }
+
     return $null
 }
 
@@ -130,7 +208,7 @@ function Find-FzfExe {
 # 3. Verificacion e instalacion de dependencias necesarias
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Cyan
+Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Green
 
 # Git (Git Bash)
 $gitBash = $null
@@ -169,13 +247,15 @@ if (!$hasPython) {
 # FZF
 $fzfPath = Find-FzfExe
 if (!$fzfPath) {
-    Write-Host "  [*] Instalando FZF de forma autonoma..." -ForegroundColor Cyan
+    Write-Host "  [*] Instalando FZF de forma autonoma..." -ForegroundColor Green
     try {
         $fzfZip = "$env:TEMP\fzf_download.zip"
         Invoke-WebRequest -Uri "https://github.com/junegunn/fzf/releases/download/v0.60.3/fzf-0.60.3-windows_amd64.zip" -OutFile $fzfZip -UseBasicParsing
         Expand-Archive -Path $fzfZip -DestinationPath $installDir -Force
         Remove-Item -Path $fzfZip -Force -ErrorAction SilentlyContinue
-        $fzfPath = "$installDir\fzf.exe"
+        if (Test-ExecutableWorks "$installDir\fzf.exe") {
+            $fzfPath = "$installDir\fzf.exe"
+        }
     } catch {
         if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
             & winget install --id junegunn.fzf -e --source winget --accept-package-agreements --accept-source-agreements --silent
@@ -188,7 +268,10 @@ if ($fzfPath) {
     Write-Host "  [OK] FZF: Presente ($fzfPath)" -ForegroundColor Green
     if ($fzfPath -ne "$installDir\fzf.exe" -and (Test-Path $fzfPath)) {
         try {
-            Copy-Item -Path $fzfPath -Destination "$installDir\fzf.exe" -Force -ErrorAction SilentlyContinue
+            $realFzf = Resolve-RealExe $fzfPath
+            if (Test-ExecutableWorks $realFzf) {
+                Copy-Item -Path $realFzf -Destination "$installDir\fzf.exe" -Force -ErrorAction SilentlyContinue
+            }
         } catch {}
     }
 } else {
@@ -198,27 +281,27 @@ if ($fzfPath) {
 # MPV
 $mpvPath = Find-MpvExe
 if (!$mpvPath) {
-    Write-Host "  [*] Instalando MPV Player de forma autonoma..." -ForegroundColor Cyan
+    Write-Host "  [*] Instalando MPV Player de forma autonoma..." -ForegroundColor Green
     
     # 1. Descarga directa standalone de MPV
     try {
         $mpv7z = "$env:TEMP\mpv_download.7z"
-        Write-Host "    -> Descargando paquete optimizado de MPV..." -ForegroundColor Cyan
+        Write-Host "    -> Descargando paquete optimizado de MPV..." -ForegroundColor Green
         Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260814/mpv-x86_64-20260814-git-7b8915bc1d.7z" -OutFile $mpv7z -UseBasicParsing
         & tar -xf $mpv7z -C $installDir
         Remove-Item -Path $mpv7z -Force -ErrorAction SilentlyContinue
-        if (Test-Path "$installDir\mpv.exe") {
+        if (Test-ExecutableWorks "$installDir\mpv.exe") {
             $mpvPath = "$installDir\mpv.exe"
         }
     } catch {
         # Fallback a WinGet o Scoop si la descarga directa fallara
         if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-            Write-Host "    -> Intentando WinGet..." -ForegroundColor Cyan
+            Write-Host "    -> Intentando WinGet..." -ForegroundColor Green
             & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
             $mpvPath = Find-MpvExe
         }
         if (!$mpvPath) {
-            Write-Host "    -> Intentando Scoop..." -ForegroundColor Cyan
+            Write-Host "    -> Intentando Scoop..." -ForegroundColor Green
             if (!(Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
                 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
                 Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
@@ -233,8 +316,15 @@ if ($mpvPath) {
     Write-Host "  [OK] MPV: Presente ($mpvPath)" -ForegroundColor Green
     if ($mpvPath -ne "$installDir\mpv.exe" -and (Test-Path $mpvPath)) {
         try {
-            $mpvDir = Split-Path $mpvPath -Parent
-            Copy-Item -Path "$mpvDir\*" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            $realMpv = Resolve-RealExe $mpvPath
+            if (Test-ExecutableWorks $realMpv) {
+                $mpvDir = Split-Path $realMpv -Parent
+                if ($mpvDir -notmatch 'shims' -and $mpvDir -ne $installDir) {
+                    Copy-Item -Path "$mpvDir\*" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+                } else {
+                    Copy-Item -Path $realMpv -Destination "$installDir\mpv.exe" -Force -ErrorAction SilentlyContinue
+                }
+            }
         } catch {}
     }
 } else {
@@ -242,24 +332,24 @@ if ($mpvPath) {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Instalacion de BeautifulSoup4 en Python
+# 4. Instalacion de BeautifulSoup4 y curl_cffi en Python
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[3/5] Configurando librerias de Python..." -ForegroundColor Cyan
+Write-Host "[3/5] Configurando librerias de Python..." -ForegroundColor Green
 
 if (Get-Command pip -ErrorAction SilentlyContinue) {
-    & pip install --quiet beautifulsoup4 2>&1 | Out-Null
-    Write-Host "  [OK] BeautifulSoup4 configurado correctamente." -ForegroundColor Green
+    & pip install --quiet beautifulsoup4 curl_cffi 2>&1 | Out-Null
+    Write-Host "  [OK] BeautifulSoup4 y curl_cffi configurados correctamente." -ForegroundColor Green
 } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    & py -m pip install --quiet beautifulsoup4 2>&1 | Out-Null
-    Write-Host "  [OK] BeautifulSoup4 configurado correctamente." -ForegroundColor Green
+    & py -m pip install --quiet beautifulsoup4 curl_cffi 2>&1 | Out-Null
+    Write-Host "  [OK] BeautifulSoup4 y curl_cffi configurados correctamente." -ForegroundColor Green
 }
 
 # ------------------------------------------------------------------------------
 # 5. Descargar la version mas reciente del script principal
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Cyan
+Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Green
 
 $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $repoUrl = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
@@ -285,7 +375,7 @@ try {
 $cmdLines = @(
     "@echo off",
     "setlocal",
-    "set `"PATH=%~dp0;%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims`"",
+    "set `"PATH=%~dp0;%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims;%USERPROFILE%\scoop\apps\fzf\current;%USERPROFILE%\scoop\apps\mpv\current`"",
     "set `"BASH_PATH=`"",
     "",
     "if exist `"C:\Program Files\Git\bin\bash.exe`" (",
@@ -311,7 +401,7 @@ Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
 # 6. Configurar variable de entorno PATH con maxima prioridad
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[5/5] Configurando variables de entorno con maxima prioridad..." -ForegroundColor Cyan
+Write-Host "[5/5] Configurando variables de entorno con maxima prioridad..." -ForegroundColor Green
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($null -eq $userPath) { $userPath = "" }
@@ -331,6 +421,11 @@ if (Test-Path $scoopShims) {
     $existingParts = $existingParts | Where-Object { $_.Trim() -ne $scoopShims }
     $finalPaths += $scoopShims
 }
+$scoopAppsFzf = "$HOME\scoop\apps\fzf\current"
+if (Test-Path $scoopAppsFzf) {
+    $existingParts = $existingParts | Where-Object { $_.Trim() -ne $scoopAppsFzf }
+    $finalPaths += $scoopAppsFzf
+}
 
 $finalPaths += $existingParts
 $newUserPath = ($finalPaths -join ';')
@@ -345,6 +440,6 @@ Write-Host "==========================================================" -Foregro
 Write-Host "  Instalacion limpia de Anime-CMD v2.1 completada!        " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Cyan
+Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Green
 Write-Host "   anime" -ForegroundColor Yellow
 Write-Host ""
