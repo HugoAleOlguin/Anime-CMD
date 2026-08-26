@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 
 CONTINUE=0
 AUDIO_PREF="latino"
@@ -35,8 +35,9 @@ show_help() {
     echo "      -h, --help       Mostrar esta ayuda"
     echo "      -v, --version    Mostrar versión instalada"
     echo ""
-    echo -e "    ${YELLOW}${BOLD}Características del motor v2.1:${NC}"
-    echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (Anime Online, TioAnime, MonosChinos, JKAnime)."
+    echo -e "    ${YELLOW}${BOLD}Características del motor v2.2:${NC}"
+    echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (Anime Online Ninja, TioAnime, MonosChinos, JKAnime)."
+    echo -e "      • ${GREEN}Agrupación Inteligente:${NC} Títulos unificados con insignias de todos los servidores disponibles."
     echo -e "      • ${GREEN}Prioridad Audio Latino:${NC} Reproduce por defecto doblaje latino con failover a subtitulado."
     echo -e "      • ${GREEN}Detección Inteligente:${NC} Detecta servidores dual-audio y enlaces alternativos de doblaje."
     echo ""
@@ -53,9 +54,20 @@ update_anime() {
     echo -e "${GREEN}==========================================================${NC}"
     echo ""
 
-    local REPO_URL="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
-    local CACHE_BUST
-    CACHE_BUST=$(date +%s 2>/dev/null || echo "1")
+    local REPO_BASE="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD"
+    local LATEST_SHA=""
+    if command -v curl >/dev/null 2>&1; then
+        LATEST_SHA=$(curl -sSL -H "User-Agent: Anime-CMD" "https://api.github.com/repos/HugoAleOlguin/Anime-CMD/commits/main" 2>/dev/null | grep -m 1 '"sha":' | cut -d '"' -f 4 || true)
+    fi
+
+    local SCRIPT_URL
+    if [ -n "$LATEST_SHA" ]; then
+        SCRIPT_URL="${REPO_BASE}/${LATEST_SHA}/ani-es"
+    else
+        local CACHE_BUST
+        CACHE_BUST=$(date +%s 2>/dev/null || echo "1")
+        SCRIPT_URL="${REPO_BASE}/main/ani-es?v=${CACHE_BUST}"
+    fi
     
     local TARGET_FILE="$0"
     if command -v cygpath >/dev/null 2>&1; then
@@ -76,11 +88,11 @@ update_anime() {
     
     local DOWNLOAD_OK=0
     if command -v curl >/dev/null 2>&1; then
-        if curl -sSL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "${REPO_URL}/ani-es?v=${CACHE_BUST}" -o "$TMP_FILE"; then
+        if curl -sSL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "${SCRIPT_URL}" -o "$TMP_FILE"; then
             DOWNLOAD_OK=1
         fi
     elif command -v wget >/dev/null 2>&1; then
-        if wget --no-cache -qO "$TMP_FILE" "${REPO_URL}/ani-es?v=${CACHE_BUST}"; then
+        if wget --no-cache -qO "$TMP_FILE" "${SCRIPT_URL}"; then
             DOWNLOAD_OK=1
         fi
     fi

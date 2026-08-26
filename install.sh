@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🎬 Anime-CMD v2.1 - Instalador y Actualizador para Linux / macOS / Termux
+# 🎬 Anime-CMD v2.2 - Instalador y Actualizador para Linux / macOS / Termux
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -8,7 +8,7 @@ set -e
 
 echo ""
 echo -e "\033[0;36m==========================================================\033[0m"
-echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v2.1       \033[0m"
+echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v2.2       \033[0m"
 echo -e "\033[0;36m==========================================================\033[0m"
 echo ""
 
@@ -23,40 +23,48 @@ if [ -n "$PREFIX" ] && [[ "$PREFIX" == *com.termux* ]]; then
     # Android Termux
     pkg update -y
     pkg install -y mpv fzf python git
-    pip install --quiet beautifulsoup4 || true
+    pip install --quiet beautifulsoup4 curl_cffi || true
 elif command -v apt-get &>/dev/null; then
     # Debian / Ubuntu / Mint / PopOS
     sudo apt-get update -y
     sudo apt-get install -y mpv fzf python3 python3-pip git
-    pip3 install --quiet beautifulsoup4 --break-system-packages 2>/dev/null || pip install --quiet beautifulsoup4 2>/dev/null || true
+    pip3 install --quiet beautifulsoup4 curl_cffi --break-system-packages 2>/dev/null || pip install --quiet beautifulsoup4 curl_cffi 2>/dev/null || true
 elif command -v pacman &>/dev/null; then
     # Arch Linux / Manjaro
     sudo pacman -Sy --noconfirm mpv fzf python python-pip git python-beautifulsoup4 2>/dev/null || sudo pacman -Sy --noconfirm mpv fzf python python-pip git
+    pip install --quiet curl_cffi --break-system-packages 2>/dev/null || pip install --quiet curl_cffi 2>/dev/null || true
 elif command -v dnf &>/dev/null; then
     # Fedora / RHEL
     sudo dnf install -y mpv fzf python3 python3-pip git python3-beautifulsoup4 2>/dev/null || sudo dnf install -y mpv fzf python3 python3-pip git
+    pip3 install --quiet curl_cffi --break-system-packages 2>/dev/null || pip install --quiet curl_cffi 2>/dev/null || true
 elif command -v brew &>/dev/null; then
     # macOS Homebrew
     brew install mpv fzf python git
-    pip3 install --quiet beautifulsoup4 || true
+    pip3 install --quiet beautifulsoup4 curl_cffi || true
 fi
 
 # 3. Descargar el script principal
 echo -e "\033[0;36m[3/4] 📥 Instalando script principal...\033[0m"
-REPO_URL="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
-TIMESTAMP=$(date +%s)
+REPO_BASE="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD"
+LATEST_SHA=$(curl -sSL -H "User-Agent: Anime-CMD" "https://api.github.com/repos/HugoAleOlguin/Anime-CMD/commits/main" 2>/dev/null | grep -m 1 '"sha":' | cut -d '"' -f 4 || true)
+if [ -n "$LATEST_SHA" ]; then
+    SCRIPT_URL="${REPO_BASE}/${LATEST_SHA}/ani-es"
+else
+    TIMESTAMP=$(date +%s)
+    SCRIPT_URL="${REPO_BASE}/main/ani-es?v=${TIMESTAMP}"
+fi
 INSTALL_DIR="/usr/local/bin"
 
 if [ -w "$INSTALL_DIR" ]; then
     rm -f "$INSTALL_DIR/anime" 2>/dev/null || true
-    curl -sL -H "Cache-Control: no-cache" "$REPO_URL/ani-es?v=$TIMESTAMP" -o "$INSTALL_DIR/anime"
+    curl -sL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "$SCRIPT_URL" -o "$INSTALL_DIR/anime"
     chmod +x "$INSTALL_DIR/anime"
     echo -e "  \033[0;32m[✔] Ejecutable instalado en $INSTALL_DIR/anime\033[0m"
 else
     USER_BIN="$HOME/.local/bin"
     mkdir -p "$USER_BIN"
     rm -f "$USER_BIN/anime" 2>/dev/null || true
-    curl -sL -H "Cache-Control: no-cache" "$REPO_URL/ani-es?v=$TIMESTAMP" -o "$USER_BIN/anime"
+    curl -sL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "$SCRIPT_URL" -o "$USER_BIN/anime"
     chmod +x "$USER_BIN/anime"
     echo -e "  \033[0;32m[✔] Ejecutable instalado en $USER_BIN/anime\033[0m"
 
@@ -70,7 +78,7 @@ fi
 
 echo ""
 echo -e "\033[0;32m==========================================================\033[0m"
-echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v2.1 completada! ✨ \033[0m"
+echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v2.2 completada! ✨ \033[0m"
 echo -e "\033[0;32m==========================================================\033[0m"
 echo ""
 echo -e "\033[0;36m👉 Escribe \033[1;33manime\033[0;36m en tu terminal para comenzar.\033[0m"

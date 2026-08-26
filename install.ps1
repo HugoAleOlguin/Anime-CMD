@@ -1,5 +1,5 @@
 # ==============================================================================
-# Anime-CMD v2.1 - Instalador y Actualizador Automatico para Windows
+# Anime-CMD v2.2 - Instalador y Actualizador Automatico para Windows
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -9,7 +9,7 @@ $ProgressPreference = "SilentlyContinue"
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "         Instalador Automatico de Anime-CMD v2.1          " -ForegroundColor Green
+Write-Host "         Instalador Automatico de Anime-CMD v2.2          " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -351,24 +351,53 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
 Write-Host ""
 Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Green
 
-$cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-$repoUrl = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main"
-$aniScriptUrl = "$repoUrl/ani-es?v=$cacheBust"
+# Obtener SHA del ultimo commit para evitar que la CDN de GitHub (Fastly) entregue una version en cache
+$sha = $null
+try {
+    $commitInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/HugoAleOlguin/Anime-CMD/commits/main" -Headers @{"User-Agent"="Anime-CMD"} -TimeoutSec 5
+    if ($commitInfo -and $commitInfo.sha) {
+        $sha = $commitInfo.sha
+    }
+} catch {}
+
+$repoBase = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD"
+if ($sha) {
+    $aniScriptUrl = "$repoBase/$sha/ani-es"
+} else {
+    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $aniScriptUrl = "$repoBase/main/ani-es?v=$cacheBust"
+}
 $aniScriptPath = "$installDir\ani-es"
 
+Remove-Item -Path $aniScriptPath -Force -ErrorAction SilentlyContinue
+
+$downloaded = $false
 try {
     Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{
         "Cache-Control" = "no-cache, no-store, must-revalidate"
         "Pragma"        = "no-cache"
     }
-    Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
-} catch {
-    Write-Host "  [!] Reintentando descarga con WebClient..." -ForegroundColor Yellow
-    $webClient = New-Object System.Net.WebClient
-    $webClient.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
-    $webClient.Headers.Add("Pragma", "no-cache")
-    $webClient.DownloadFile($aniScriptUrl, $aniScriptPath)
-    Write-Host "  [OK] Script principal v2.1 descargado con exito." -ForegroundColor Green
+    if ((Test-Path $aniScriptPath) -and (Get-Item $aniScriptPath).Length -gt 1000) {
+        $downloaded = $true
+    }
+} catch {}
+
+if (!$downloaded) {
+    try {
+        $webClient = New-Object System.Net.WebClient
+        $webClient.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
+        $webClient.Headers.Add("Pragma", "no-cache")
+        $webClient.DownloadFile($aniScriptUrl, $aniScriptPath)
+        if ((Test-Path $aniScriptPath) -and (Get-Item $aniScriptPath).Length -gt 1000) {
+            $downloaded = $true
+        }
+    } catch {}
+}
+
+if ($downloaded) {
+    Write-Host "  [OK] Script principal v2.2 descargado con exito." -ForegroundColor Green
+} else {
+    Write-Host "  [!] Error al descargar ani-es desde GitHub." -ForegroundColor Red
 }
 
 # Crear el comando ejecutable anime.cmd
@@ -437,7 +466,7 @@ Write-Host "  [OK] $installDir configurado con maxima prioridad en PATH." -Foreg
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  Instalacion limpia de Anime-CMD v2.1 completada!        " -ForegroundColor Green
+Write-Host "  Instalacion limpia de Anime-CMD v2.2 completada!        " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Green

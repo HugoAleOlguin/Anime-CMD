@@ -1,13 +1,13 @@
 <div align="center">
 
-# 🎬 Anime-CMD v2.0
+# 🎬 Anime-CMD v2.2
 
-**Herramienta interactiva de línea de comandos con motor agregador multi-proveedor para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
+**Herramienta interactiva de línea de comandos con motor agregador multi-proveedor y agrupación inteligente para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Plataforma-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20(Termux)-green.svg)]()
 [![Shell](https://img.shields.io/badge/CLI-Bash%20%2B%20Python-orange.svg)]()
-[![Providers](https://img.shields.io/badge/Fuentes-TioAnime%20%7C%20MonosChinos%20%7C%20JKAnime-blueviolet.svg)]()
+[![Providers](https://img.shields.io/badge/Fuentes-AnimeOnline%20%7C%20TioAnime%20%7C%20MonosChinos%20%7C%20JKAnime-blueviolet.svg)]()
 
 </div>
 
@@ -16,19 +16,19 @@
 ## ⚡ Características Principales
 
 - 🌐 **Motor Agregador Multi-Plataforma:** Escaneo concurrente y paralelo en milisegundos a través de las principales bibliotecas de anime activas:
+  - 🟠 **Anime Online (AnimeOnline.Ninja)** *(Nuevo)*
   - 🟣 **TioAnime**
   - 🔵 **MonosChinos**
   - 🟢 **JKAnime**
   - *(AnimeFLV desactivado temporalmente por inestabilidad de sus servidores)*
-- 🔊 **Prioridad Absoluta en Audio Latino (`[LAT]`):** El algoritmo clasifica automáticamente todas las fuentes priorizando doblaje latino (`[LAT]`), seguido de castellano (`[CAST]`), y con fallback automático a subtitulado en japonés (`[SUB]`).
-- 🏷️ **Etiquetado Visual de Fuente y Audio:** Identifica al instante el proveedor y el tipo de audio en el menú de FZF con alineación perfecta:
+- 📦 **Agrupación Inteligente de Servidores:** Los animes duplicados entre múltiples plataformas se consolidan en una sola opción interactiva que muestra las insignias de todos los servidores disponibles:
   ```text
-  🔊 [LAT]   [TioAnime]     Dragon Ball Super Latino
-  🇯🇵 [SUB]   [JKAnime]      Dragon Ball Super
-  🇯🇵 [SUB]   [MonosChinos]  Dragon Ball Super
+  🔊 [LAT]   [Anime Online / JKAnime]   Dragon Ball Z
+  🇯🇵 [SUB]   [TioAnime / MonosChinos]   Dragon Ball Super
   ```
+- 🔊 **Prioridad Absoluta en Audio Latino (`[LAT]`):** El algoritmo clasifica automáticamente todas las fuentes priorizando doblaje latino (`[LAT]`), seguido de castellano (`[CAST]`), y con fallback automático a subtitulado en japonés (`[SUB]`).
 - 🚀 **Extractor Universal Multi-Servidor:** Resuelve y reproduce automáticamente enlaces directos y streams HLS de **Mediafire**, **YourUpload**, **Mp4upload**, **Voe.sx**, **Streamwish**, **Filemoon**, **JKPlayer (M3U8)**, **Ok.ru**, **Mega** y más con **failover automático** si algún servidor está caído.
-- 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector numérico de episodios y menú contextual post-reproducción (Siguiente capítulo, Retroceder o Cambiar Audio).
+- 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector numérico de episodios y selector dinámico de servidores.
 - 🕒 **Historial y Reanudación Inteligente (`-c`):** Guarda tu progreso y último minuto visto en una base de datos local SQLite para continuar exactamente donde lo dejaste.
 - 💻 **Multiplataforma Real:** Compatible con **CMD**, **PowerShell**, **Windows Terminal**, **Git Bash**, **Linux**, **macOS** y **Android (Termux)**.
 
