@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎬 Anime-CMD v2.2
+# 🎬 Anime-CMD v2.3
 
 **Herramienta interactiva de línea de comandos con motor agregador multi-proveedor y agrupación inteligente para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
 
@@ -16,19 +16,20 @@
 ## ⚡ Características Principales
 
 - 🌐 **Motor Agregador Multi-Plataforma:** Escaneo concurrente y paralelo en milisegundos a través de las principales bibliotecas de anime activas:
-  - 🟠 **Anime Online (AnimeOnline.Ninja)** *(Nuevo)*
+  - 🟠 **Anime Online (AnimeOnline.Ninja)**
   - 🟣 **TioAnime**
   - 🔵 **MonosChinos**
   - 🟢 **JKAnime**
   - *(AnimeFLV desactivado temporalmente por inestabilidad de sus servidores)*
+- 🌸 **Separadores por Temporada y Títulos Completos:** Navegación mejorada con bloques visuales por temporada, títulos de capítulos y búsqueda instantánea en AnimeOnline.
 - 📦 **Agrupación Inteligente de Servidores:** Los animes duplicados entre múltiples plataformas se consolidan en una sola opción interactiva que muestra las insignias de todos los servidores disponibles:
   ```text
   🔊 [LAT]   [Anime Online / JKAnime]   Dragon Ball Z
   🇯🇵 [SUB]   [TioAnime / MonosChinos]   Dragon Ball Super
   ```
 - 🔊 **Prioridad Absoluta en Audio Latino (`[LAT]`):** El algoritmo clasifica automáticamente todas las fuentes priorizando doblaje latino (`[LAT]`), seguido de castellano (`[CAST]`), y con fallback automático a subtitulado en japonés (`[SUB]`).
-- 🚀 **Extractor Universal Multi-Servidor:** Resuelve y reproduce automáticamente enlaces directos y streams HLS de **Mediafire**, **YourUpload**, **Mp4upload**, **Voe.sx**, **Streamwish**, **Filemoon**, **JKPlayer (M3U8)**, **Ok.ru**, **Mega** y más con **failover automático** si algún servidor está caído.
-- 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector numérico de episodios y selector dinámico de servidores.
+- 🚀 **Extractor Robusto con Pre-Verificación:** Resuelve y reproduce automáticamente enlaces directos y streams HLS de **Streamtape**, **Mp4upload**, **YourUpload**, **Streamwish**, **Voe.sx**, **Filemoon**, **JKPlayer (M3U8)**, **Ok.ru**, **Mega** y más con **evasión de señuelos anti-scraper, verificación HTTP previa y failover automático**.
+- 🎯 **Menú Interactivo con FZF:** Navegación instantánea con atajos de teclado, selector de episodios con temporadas, lista rápida post-reproducción y cambio dinámico de servidor.
 - 🕒 **Historial y Reanudación Inteligente (`-c`):** Guarda tu progreso y último minuto visto en una base de datos local SQLite para continuar exactamente donde lo dejaste.
 - 💻 **Multiplataforma Real:** Compatible con **CMD**, **PowerShell**, **Windows Terminal**, **Git Bash**, **Linux**, **macOS** y **Android (Termux)**.
 

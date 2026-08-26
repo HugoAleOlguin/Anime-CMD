@@ -1,5 +1,5 @@
 # ==============================================================================
-# Anime-CMD v2.2 - Instalador y Actualizador Automatico para Windows
+# Anime-CMD v2.3 - Instalador y Actualizador Automatico para Windows
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -9,7 +9,7 @@ $ProgressPreference = "SilentlyContinue"
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "         Instalador Automatico de Anime-CMD v2.2          " -ForegroundColor Green
+Write-Host "         Instalador Automatico de Anime-CMD v2.3          " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -50,6 +50,9 @@ if (!(Test-Path $installDir)) {
     Remove-Item -Path "$installDir\ani-es" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$installDir\anime.cmd" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$installDir\anime.bat" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$installDir\ao_eps.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$installDir\mpv_run.log" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$installDir\*.tmp" -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
@@ -466,7 +469,7 @@ Write-Host "  [OK] $installDir configurado con maxima prioridad en PATH." -Foreg
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  Instalacion limpia de Anime-CMD v2.2 completada!        " -ForegroundColor Green
+Write-Host "  Instalacion limpia de Anime-CMD v2.3 completada!        " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Green

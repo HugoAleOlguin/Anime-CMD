@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="2.2.0"
+VERSION="2.3.0"
 
 CONTINUE=0
 AUDIO_PREF="latino"
@@ -35,11 +35,12 @@ show_help() {
     echo "      -h, --help       Mostrar esta ayuda"
     echo "      -v, --version    Mostrar versión instalada"
     echo ""
-    echo -e "    ${YELLOW}${BOLD}Características del motor v2.2:${NC}"
+    echo -e "    ${YELLOW}${BOLD}Características del motor v2.3:${NC}"
     echo -e "      • ${GREEN}Motor Multi-Proveedor:${NC} Búsqueda en paralelo (Anime Online Ninja, TioAnime, MonosChinos, JKAnime)."
+    echo -e "      • ${GREEN}Separadores por Temporada:${NC} Títulos de capítulos y navegación por temporadas en AnimeOnline."
     echo -e "      • ${GREEN}Agrupación Inteligente:${NC} Títulos unificados con insignias de todos los servidores disponibles."
     echo -e "      • ${GREEN}Prioridad Audio Latino:${NC} Reproduce por defecto doblaje latino con failover a subtitulado."
-    echo -e "      • ${GREEN}Detección Inteligente:${NC} Detecta servidores dual-audio y enlaces alternativos de doblaje."
+    echo -e "      • ${GREEN}Evasión de Señuelos y Verificación:${NC} Extracción directa de streams con chequeo previo HTTP."
     echo ""
 }
 
@@ -103,8 +104,28 @@ update_anime() {
             NEW_VERSION=$(grep -m 1 'VERSION=' "$TMP_FILE" | cut -d '"' -f 2)
             cp -f "$TMP_FILE" "$TARGET_FILE" 2>/dev/null || mv -f "$TMP_FILE" "$TARGET_FILE"
             chmod +x "$TARGET_FILE" 2>/dev/null || true
+
+            # Si el script está instalado en ~/.anime/ani-es y es diferente al target, actualizarlo también
+            if [ -f "$HOME/.anime/ani-es" ] && [ "$TARGET_FILE" != "$HOME/.anime/ani-es" ]; then
+                cp -f "$TMP_FILE" "$HOME/.anime/ani-es" 2>/dev/null || true
+                chmod +x "$HOME/.anime/ani-es" 2>/dev/null || true
+            fi
+            # Si existe anime en /usr/local/bin o ~/.local/bin, sincronizar
+            for alt_bin in "/usr/local/bin/anime" "$HOME/.local/bin/anime"; do
+                if [ -f "$alt_bin" ] && [ "$TARGET_FILE" != "$alt_bin" ]; then
+                    cp -f "$TMP_FILE" "$alt_bin" 2>/dev/null || true
+                    chmod +x "$alt_bin" 2>/dev/null || true
+                fi
+            done
+
+            # Limpieza exhaustiva de restos de versiones anteriores
             rm -f "$TMP_FILE" 2>/dev/null || true
+            rm -f "$HOME/.anime/ao_eps.json" "$HOME/.anime/mpv_run.log" 2>/dev/null || true
+            rm -f "$HOME/.anime"/*.tmp 2>/dev/null || true
+            rm -rf "$HOME/ani-es" "$HOME/.anime-cmd" 2>/dev/null || true
+
             echo -e "${GREEN}[✔] ¡Anime-CMD actualizado exitosamente a la versión ${BOLD}v${NEW_VERSION}${NC}${GREEN}!${NC}"
+            echo -e "${GREEN}[✔] Cachés y archivos temporales anteriores eliminados limpiamente.${NC}"
             echo ""
             exit 0
         else

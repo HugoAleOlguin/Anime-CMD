@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🎬 Anime-CMD v2.2 - Instalador y Actualizador para Linux / macOS / Termux
+# 🎬 Anime-CMD v2.3 - Instalador y Actualizador para Linux / macOS / Termux
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -8,13 +8,14 @@ set -e
 
 echo ""
 echo -e "\033[0;36m==========================================================\033[0m"
-echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v2.2       \033[0m"
+echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v2.3       \033[0m"
 echo -e "\033[0;36m==========================================================\033[0m"
 echo ""
 
 # 1. Limpieza de versiones previas
 echo -e "\033[0;36m[1/4] 🧹 Limpiando versiones y archivos previos...\033[0m"
 rm -rf "$HOME/ani-es" "$HOME/.anime-cmd" "$HOME/.local/bin/ani-es" "/usr/local/bin/ani-es" 2>/dev/null || true
+rm -f "$HOME/.anime/ao_eps.json" "$HOME/.anime/mpv_run.log" "$HOME/.anime"/*.tmp 2>/dev/null || true
 
 # 2. Instalar dependencias según el sistema (SIN wget, SIN jq)
 echo -e "\033[0;36m[2/4] 🔍 Verificando dependencias del sistema...\033[0m"
@@ -78,7 +79,7 @@ fi
 
 echo ""
 echo -e "\033[0;32m==========================================================\033[0m"
-echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v2.2 completada! ✨ \033[0m"
+echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v2.3 completada! ✨ \033[0m"
 echo -e "\033[0;32m==========================================================\033[0m"
 echo ""
 echo -e "\033[0;36m👉 Escribe \033[1;33manime\033[0;36m en tu terminal para comenzar.\033[0m"

@@ -7,3 +7,5 @@ cookies.txt
 history.db
 __pycache__/
 *.pyc
+graphify-out/
+ao_eps.json
