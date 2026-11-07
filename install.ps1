@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Anime-CMD v1.7.0 - Instalador y Actualizador Automatico para Windows
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
@@ -355,57 +355,76 @@ Write-Host ""
 Write-Host "[4/5] Configurando Anime-CMD v1.7.0..." -ForegroundColor Green
 
 # Caso A: Instalación local desde repositorio clonado
-$localSrc = Join-Path $PSScriptRoot "src"
-$localDistExe = Join-Path $PSScriptRoot "dist\anime.exe"
-$localRootExe = Join-Path $PSScriptRoot "anime.exe"
+$hasLocalSource = $false
+$localRoot = $null
 
-if (Test-Path $localSrc) {
-    Copy-Item -Path $localSrc -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+if (![string]::IsNullOrEmpty($PSScriptRoot) -and (Test-Path "$PSScriptRoot\src\main.py")) {
+    $localRoot = $PSScriptRoot
+    $hasLocalSource = $true
+} elseif (Test-Path ".\src\main.py") {
+    $localRoot = (Get-Location).Path
+    $hasLocalSource = $true
+}
+
+if ($hasLocalSource) {
+    Copy-Item -Path "$localRoot\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "  [OK] Codigo fuente src/ copiado a $installDir" -ForegroundColor Green
-    if (Test-Path $localDistExe) {
-        Copy-Item -Path $localDistExe -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+    if (Test-Path "$localRoot\dist\anime.exe") {
+        Copy-Item -Path "$localRoot\dist\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
         Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
-    } elseif (Test-Path $localRootExe) {
-        Copy-Item -Path $localRootExe -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+    } elseif (Test-Path "$localRoot\anime.exe") {
+        Copy-Item -Path "$localRoot\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
         Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
     }
 } else {
     # Caso B: Instalación remota via web (irm ... | iex)
-    $releaseExeUrl = "https://github.com/HugoAleOlguin/Anime-CMD/releases/latest/download/anime.exe"
-    $downloadedExe = $false
-    try {
-        Invoke-WebRequest -Uri $releaseExeUrl -OutFile "$installDir\anime.exe" -UseBasicParsing -TimeoutSec 15
-        if ((Test-Path "$installDir\anime.exe") -and (Get-Item "$installDir\anime.exe").Length -gt 1000000) {
-            $downloadedExe = $true
-            Write-Host "  [OK] Binario standalone anime.exe descargado desde Releases." -ForegroundColor Green
-        }
-    } catch {}
+    $installed = $false
+    $cloneDir = "$installDir\repo"
 
-    if (!$downloadedExe) {
-        $cloneDir = "$installDir\repo"
-        if (Get-Command git.exe -ErrorAction SilentlyContinue) {
-            if (Test-Path $cloneDir) {
-                try { (Push-Location $cloneDir); git pull --quiet; (Pop-Location) } catch {}
+    # 1. Intentar clonar o actualizar via git si está disponible
+    $gitExe = $null
+    if (Get-Command git.exe -ErrorAction SilentlyContinue) {
+        $gitExe = "git.exe"
+    } elseif (Test-Path "C:\Program Files\Git\cmd\git.exe") {
+        $gitExe = "C:\Program Files\Git\cmd\git.exe"
+    }
+
+    if ($gitExe) {
+        try {
+            if (Test-Path "$cloneDir\.git") {
+                & $gitExe -C $cloneDir pull --quiet 2>$null
             } else {
-                git clone --depth 1 --quiet "https://github.com/HugoAleOlguin/Anime-CMD.git" $cloneDir 2>$null
+                Remove-Item -Path $cloneDir -Recurse -Force -ErrorAction SilentlyContinue
+                & $gitExe clone --depth 1 --quiet "https://github.com/HugoAleOlguin/Anime-CMD.git" $cloneDir 2>$null
             }
-        }
-        if (Test-Path "$cloneDir\src") {
-            Copy-Item -Path "$cloneDir\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "  [OK] Codigo fuente clonado e instalado en $installDir" -ForegroundColor Green
-        } else {
-            $zipPath = "$env:TEMP\anime_repo.zip"
-            try {
-                Invoke-WebRequest -Uri "https://github.com/HugoAleOlguin/Anime-CMD/archive/refs/heads/main.zip" -OutFile $zipPath -UseBasicParsing
-                Expand-Archive -Path $zipPath -DestinationPath "$env:TEMP\anime_extracted" -Force
-                if (Test-Path "$env:TEMP\anime_extracted\Anime-CMD-main\src") {
-                    Copy-Item -Path "$env:TEMP\anime_extracted\Anime-CMD-main\src" -Destination $installDir -Recurse -Force
-                    Write-Host "  [OK] Codigo fuente descargado e instalado en $installDir" -ForegroundColor Green
-                }
-            } catch {} finally {
-                Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
-                Remove-Item -Path "$env:TEMP\anime_extracted" -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path "$cloneDir\src") {
+                Copy-Item -Path "$cloneDir\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "  [OK] Codigo fuente clonado e instalado en $installDir" -ForegroundColor Green
+                $installed = $true
             }
+        } catch {}
+    }
+
+    # 2. Si no se pudo por git, descargar ZIP del repositorio desde GitHub
+    if (!$installed) {
+        $zipPath = "$env:TEMP\anime_repo.zip"
+        $extractDir = "$env:TEMP\anime_extracted"
+        try {
+            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://github.com/HugoAleOlguin/Anime-CMD/archive/refs/heads/main.zip" -OutFile $zipPath -UseBasicParsing
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            $extractedSrc = Get-ChildItem -Path $extractDir -Recurse -Filter "src" -Directory | Select-Object -First 1
+            if ($extractedSrc -and (Test-Path $extractedSrc.FullName)) {
+                Copy-Item -Path $extractedSrc.FullName -Destination $installDir -Recurse -Force
+                Write-Host "  [OK] Codigo fuente descargado e instalado en $installDir" -ForegroundColor Green
+                $installed = $true
+            }
+        } catch {
+            Write-Host "  [!] Error descargando archivo ZIP del repositorio: $_" -ForegroundColor Red
+        } finally {
+            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -426,14 +445,8 @@ $cmdLines = @(
     "    exit /b %ERRORLEVEL%",
     ")",
     "",
-    "for %%X in (python.exe) do (",
-    "    if exist `"%%~`$PATH:X`" (",
-    "        `"%%~`$PATH:X`" `"%~dp0src\main.py`" %*",
-    "        exit /b %ERRORLEVEL%",
-    "    )",
-    ")",
-    "",
-    "echo [ERROR] No se encontro anime.exe ni Python para ejecutar Anime-CMD.",
+    "echo [ERROR] No se encontro anime.exe ni el codigo fuente en %~dp0",
+    "echo Por favor ejecuta de nuevo el instalador de Anime-CMD.",
     "exit /b 1"
 )
 
