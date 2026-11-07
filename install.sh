@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🎬 Anime-CMD v1.5.0 - Instalador y Actualizador para Linux / macOS / Termux
+# 🎬 Anime-CMD v1.7.0 - Instalador y Actualizador para Linux / macOS / Termux
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -8,7 +8,7 @@ set -e
 
 echo ""
 echo -e "\033[0;36m==========================================================\033[0m"
-echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v1.5.0       \033[0m"
+echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v1.7.0       \033[0m"
 echo -e "\033[0;36m==========================================================\033[0m"
 echo ""
 
@@ -44,8 +44,8 @@ elif command -v brew &>/dev/null; then
     pip3 install --quiet beautifulsoup4 curl_cffi || true
 fi
 
-# 3. Instalar código fuente y lanzador de Anime-CMD v1.5.0
-echo -e "\033[0;36m[3/4] 📥 Configurando Anime-CMD v1.5.0...\033[0m"
+# 3. Instalar código fuente y lanzador de Anime-CMD v1.7.0
+echo -e "\033[0;36m[3/4] 📥 Configurando Anime-CMD v1.7.0...\033[0m"
 
 APP_DIR="$HOME/.anime/app"
 mkdir -p "$APP_DIR"
@@ -99,7 +99,7 @@ fi
 
 echo ""
 echo -e "\033[0;32m==========================================================\033[0m"
-echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v1.5.0 completada! ✨ \033[0m"
+echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v1.7.0 completada! ✨ \033[0m"
 echo -e "\033[0;32m==========================================================\033[0m"
 echo ""
 echo -e "\033[0;36m👉 Escribe \033[1;33manime\033[0;36m en tu terminal para comenzar.\033[0m"

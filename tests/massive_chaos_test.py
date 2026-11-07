@@ -1,4 +1,4 @@
-"""Harness de pruebas masivas y caos para Anime-CMD v1.5.0.
+"""Harness de pruebas masivas y caos para Anime-CMD v1.7.0.
 Simula decenas de usuarios reales, casos hostiles, pruebas de base de datos
 concurrente, búsquedas difusas, doblaje latino vs sub y extracción de streams.
 """

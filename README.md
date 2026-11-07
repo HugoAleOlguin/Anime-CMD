@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎬 Anime-CMD v1.5.0
+# 🎬 Anime-CMD v1.7.0
 
 **Herramienta interactiva de línea de comandos con motor agregador multi-proveedor y agrupación inteligente para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
 

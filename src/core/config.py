@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.7.0"
 
 # Directorio base de datos y cache (~/.anime)
 HOME_DIR = Path.home()
