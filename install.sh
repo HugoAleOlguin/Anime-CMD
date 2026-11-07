@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🎬 Anime-CMD v2.3 - Instalador y Actualizador para Linux / macOS / Termux
+# 🎬 Anime-CMD v1.5.0 - Instalador y Actualizador para Linux / macOS / Termux
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -8,7 +8,7 @@ set -e
 
 echo ""
 echo -e "\033[0;36m==========================================================\033[0m"
-echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v2.3       \033[0m"
+echo -e "\033[0;32m         🎬 Instalador Automático de Anime-CMD v1.5.0       \033[0m"
 echo -e "\033[0;36m==========================================================\033[0m"
 echo ""
 
@@ -44,42 +44,62 @@ elif command -v brew &>/dev/null; then
     pip3 install --quiet beautifulsoup4 curl_cffi || true
 fi
 
-# 3. Descargar el script principal
-echo -e "\033[0;36m[3/4] 📥 Instalando script principal...\033[0m"
-REPO_BASE="https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD"
-LATEST_SHA=$(curl -sSL -H "User-Agent: Anime-CMD" "https://api.github.com/repos/HugoAleOlguin/Anime-CMD/commits/main" 2>/dev/null | grep -m 1 '"sha":' | cut -d '"' -f 4 || true)
-if [ -n "$LATEST_SHA" ]; then
-    SCRIPT_URL="${REPO_BASE}/${LATEST_SHA}/ani-es"
+# 3. Instalar código fuente y lanzador de Anime-CMD v1.5.0
+echo -e "\033[0;36m[3/4] 📥 Configurando Anime-CMD v1.5.0...\033[0m"
+
+APP_DIR="$HOME/.anime/app"
+mkdir -p "$APP_DIR"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+if [ -d "$SCRIPT_DIR/src" ]; then
+    cp -r "$SCRIPT_DIR/src" "$APP_DIR/"
+    echo -e "  \033[0;32m[✔] Código fuente copiado a $APP_DIR\033[0m"
 else
-    TIMESTAMP=$(date +%s)
-    SCRIPT_URL="${REPO_BASE}/main/ani-es?v=${TIMESTAMP}"
+    if [ -d "$APP_DIR/.git" ]; then
+        (cd "$APP_DIR" && git pull --quiet 2>/dev/null || true)
+    else
+        git clone --depth 1 --quiet "https://github.com/HugoAleOlguin/Anime-CMD.git" "$APP_DIR" 2>/dev/null || true
+    fi
+    echo -e "  \033[0;32m[✔] Repositorio clonado en $APP_DIR\033[0m"
 fi
+
 INSTALL_DIR="/usr/local/bin"
+TARGET_DIR=""
 
 if [ -w "$INSTALL_DIR" ]; then
-    rm -f "$INSTALL_DIR/anime" 2>/dev/null || true
-    curl -sL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "$SCRIPT_URL" -o "$INSTALL_DIR/anime"
-    chmod +x "$INSTALL_DIR/anime"
-    echo -e "  \033[0;32m[✔] Ejecutable instalado en $INSTALL_DIR/anime\033[0m"
+    TARGET_DIR="$INSTALL_DIR"
 else
-    USER_BIN="$HOME/.local/bin"
-    mkdir -p "$USER_BIN"
-    rm -f "$USER_BIN/anime" 2>/dev/null || true
-    curl -sL -H "Cache-Control: no-cache, no-store, must-revalidate" -H "Pragma: no-cache" "$SCRIPT_URL" -o "$USER_BIN/anime"
-    chmod +x "$USER_BIN/anime"
-    echo -e "  \033[0;32m[✔] Ejecutable instalado en $USER_BIN/anime\033[0m"
+    TARGET_DIR="$HOME/.local/bin"
+    mkdir -p "$TARGET_DIR"
+fi
 
-    # 4. Configurar PATH
-    if [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
+LAUNCHER="$TARGET_DIR/anime"
+cat << 'EOF' > "$LAUNCHER"
+#!/usr/bin/env bash
+APP_MAIN="$HOME/.anime/app/src/main.py"
+if [ ! -f "$APP_MAIN" ]; then
+    echo "[ERROR] No se encontró $APP_MAIN" >&2
+    exit 1
+fi
+exec python3 "$APP_MAIN" "$@"
+EOF
+
+chmod +x "$LAUNCHER"
+echo -e "  \033[0;32m[✔] Lanzador instalado en $LAUNCHER\033[0m"
+
+# 4. Configurar PATH si es necesario
+if [ "$TARGET_DIR" = "$HOME/.local/bin" ]; then
+    if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
         echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.bashrc"
-        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.zshrc" 2>/dev/null || true
-        echo -e "  \033[0;32m[✔] $USER_BIN añadido al PATH.\033[0m"
+        [ -f "$HOME/.zshrc" ] && echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$HOME/.zshrc" 2>/dev/null || true
+        echo -e "  \033[0;32m[✔] $TARGET_DIR añadido al PATH.\033[0m"
     fi
 fi
 
 echo ""
 echo -e "\033[0;32m==========================================================\033[0m"
-echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v2.3 completada! ✨ \033[0m"
+echo -e "\033[0;32m  ✨ ¡Instalación limpia de Anime-CMD v1.5.0 completada! ✨ \033[0m"
 echo -e "\033[0;32m==========================================================\033[0m"
 echo ""
 echo -e "\033[0;36m👉 Escribe \033[1;33manime\033[0;36m en tu terminal para comenzar.\033[0m"

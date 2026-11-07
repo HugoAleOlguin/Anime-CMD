@@ -1,5 +1,5 @@
-# ==============================================================================
-# Anime-CMD v2.3 - Instalador y Actualizador Automatico para Windows
+﻿# ==============================================================================
+# Anime-CMD v1.5.0 - Instalador y Actualizador Automatico para Windows
 # Repositorio: https://github.com/HugoAleOlguin/Anime-CMD
 # ==============================================================================
 
@@ -9,7 +9,7 @@ $ProgressPreference = "SilentlyContinue"
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "         Instalador Automatico de Anime-CMD v2.3          " -ForegroundColor Green
+Write-Host "         Instalador Automatico de Anime-CMD v1.5.0        " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -349,85 +349,96 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
 }
 
 # ------------------------------------------------------------------------------
-# 5. Descargar la version mas reciente del script principal
+# 5. Instalar codigo fuente y lanzador de Anime-CMD v1.5.0
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[4/5] Descargando Anime-CMD fresco desde el repositorio..." -ForegroundColor Green
+Write-Host "[4/5] Configurando Anime-CMD v1.5.0..." -ForegroundColor Green
 
-# Obtener SHA del ultimo commit para evitar que la CDN de GitHub (Fastly) entregue una version en cache
-$sha = $null
-try {
-    $commitInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/HugoAleOlguin/Anime-CMD/commits/main" -Headers @{"User-Agent"="Anime-CMD"} -TimeoutSec 5
-    if ($commitInfo -and $commitInfo.sha) {
-        $sha = $commitInfo.sha
+# Caso A: Instalación local desde repositorio clonado
+$localSrc = Join-Path $PSScriptRoot "src"
+$localDistExe = Join-Path $PSScriptRoot "dist\anime.exe"
+$localRootExe = Join-Path $PSScriptRoot "anime.exe"
+
+if (Test-Path $localSrc) {
+    Copy-Item -Path $localSrc -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "  [OK] Codigo fuente src/ copiado a $installDir" -ForegroundColor Green
+    if (Test-Path $localDistExe) {
+        Copy-Item -Path $localDistExe -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
+    } elseif (Test-Path $localRootExe) {
+        Copy-Item -Path $localRootExe -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
     }
-} catch {}
-
-$repoBase = "https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD"
-if ($sha) {
-    $aniScriptUrl = "$repoBase/$sha/ani-es"
 } else {
-    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $aniScriptUrl = "$repoBase/main/ani-es?v=$cacheBust"
-}
-$aniScriptPath = "$installDir\ani-es"
-
-Remove-Item -Path $aniScriptPath -Force -ErrorAction SilentlyContinue
-
-$downloaded = $false
-try {
-    Invoke-WebRequest -Uri $aniScriptUrl -OutFile $aniScriptPath -UseBasicParsing -Headers @{
-        "Cache-Control" = "no-cache, no-store, must-revalidate"
-        "Pragma"        = "no-cache"
-    }
-    if ((Test-Path $aniScriptPath) -and (Get-Item $aniScriptPath).Length -gt 1000) {
-        $downloaded = $true
-    }
-} catch {}
-
-if (!$downloaded) {
+    # Caso B: Instalación remota via web (irm ... | iex)
+    $releaseExeUrl = "https://github.com/HugoAleOlguin/Anime-CMD/releases/latest/download/anime.exe"
+    $downloadedExe = $false
     try {
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
-        $webClient.Headers.Add("Pragma", "no-cache")
-        $webClient.DownloadFile($aniScriptUrl, $aniScriptPath)
-        if ((Test-Path $aniScriptPath) -and (Get-Item $aniScriptPath).Length -gt 1000) {
-            $downloaded = $true
+        Invoke-WebRequest -Uri $releaseExeUrl -OutFile "$installDir\anime.exe" -UseBasicParsing -TimeoutSec 15
+        if ((Test-Path "$installDir\anime.exe") -and (Get-Item "$installDir\anime.exe").Length -gt 1000000) {
+            $downloadedExe = $true
+            Write-Host "  [OK] Binario standalone anime.exe descargado desde Releases." -ForegroundColor Green
         }
     } catch {}
+
+    if (!$downloadedExe) {
+        $cloneDir = "$installDir\repo"
+        if (Get-Command git.exe -ErrorAction SilentlyContinue) {
+            if (Test-Path $cloneDir) {
+                try { (Push-Location $cloneDir); git pull --quiet; (Pop-Location) } catch {}
+            } else {
+                git clone --depth 1 --quiet "https://github.com/HugoAleOlguin/Anime-CMD.git" $cloneDir 2>$null
+            }
+        }
+        if (Test-Path "$cloneDir\src") {
+            Copy-Item -Path "$cloneDir\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "  [OK] Codigo fuente clonado e instalado en $installDir" -ForegroundColor Green
+        } else {
+            $zipPath = "$env:TEMP\anime_repo.zip"
+            try {
+                Invoke-WebRequest -Uri "https://github.com/HugoAleOlguin/Anime-CMD/archive/refs/heads/main.zip" -OutFile $zipPath -UseBasicParsing
+                Expand-Archive -Path $zipPath -DestinationPath "$env:TEMP\anime_extracted" -Force
+                if (Test-Path "$env:TEMP\anime_extracted\Anime-CMD-main\src") {
+                    Copy-Item -Path "$env:TEMP\anime_extracted\Anime-CMD-main\src" -Destination $installDir -Recurse -Force
+                    Write-Host "  [OK] Codigo fuente descargado e instalado en $installDir" -ForegroundColor Green
+                }
+            } catch {} finally {
+                Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path "$env:TEMP\anime_extracted" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
 
-if ($downloaded) {
-    Write-Host "  [OK] Script principal v2.2 descargado con exito." -ForegroundColor Green
-} else {
-    Write-Host "  [!] Error al descargar ani-es desde GitHub." -ForegroundColor Red
-}
-
-# Crear el comando ejecutable anime.cmd
+# Crear el comando ejecutable universal anime.cmd
 $cmdLines = @(
     "@echo off",
     "setlocal",
     "set `"PATH=%~dp0;%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%LOCALAPPDATA%\Programs\mpv;C:\Program Files\mpv;C:\Program Files (x86)\mpv;%USERPROFILE%\scoop\shims;%USERPROFILE%\scoop\apps\fzf\current;%USERPROFILE%\scoop\apps\mpv\current`"",
-    "set `"BASH_PATH=`"",
     "",
-    "if exist `"C:\Program Files\Git\bin\bash.exe`" (",
-    "    set `"BASH_PATH=C:\Program Files\Git\bin\bash.exe`"",
-    ") else if exist `"%LOCALAPPDATA%\Programs\Git\bin\bash.exe`" (",
-    "    set `"BASH_PATH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe`"",
-    ") else (",
-    "    for %%X in (bash.exe) do (set `"BASH_PATH=%%~`$PATH:X`")",
+    "if exist `"%~dp0anime.exe`" (",
+    "    `"%~dp0anime.exe`" %*",
+    "    exit /b %ERRORLEVEL%",
     ")",
     "",
-    "if not defined BASH_PATH (",
-    "    echo [ERROR] Git Bash no fue encontrado. Asegurate de tener Git instalado.",
-    "    exit /b 1",
+    "if exist `"%~dp0src\main.py`" (",
+    "    python `"%~dp0src\main.py`" %*",
+    "    exit /b %ERRORLEVEL%",
     ")",
     "",
-    "`"%BASH_PATH%`" `"%~dp0ani-es`" %*"
+    "for %%X in (python.exe) do (",
+    "    if exist `"%%~`$PATH:X`" (",
+    "        `"%%~`$PATH:X`" `"%~dp0src\main.py`" %*",
+    "        exit /b %ERRORLEVEL%",
+    "    )",
+    ")",
+    "",
+    "echo [ERROR] No se encontro anime.exe ni Python para ejecutar Anime-CMD.",
+    "exit /b 1"
 )
 
 [System.IO.File]::WriteAllLines("$installDir\anime.cmd", $cmdLines)
-Write-Host "  [OK] Lanzador anime.cmd generado." -ForegroundColor Green
+Write-Host "  [OK] Lanzador universal anime.cmd generado." -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
 # 6. Configurar variable de entorno PATH con maxima prioridad
@@ -469,7 +480,7 @@ Write-Host "  [OK] $installDir configurado con maxima prioridad en PATH." -Foreg
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  Instalacion limpia de Anime-CMD v2.3 completada!        " -ForegroundColor Green
+Write-Host "  Instalacion limpia de Anime-CMD v1.5.0 completada!      " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Abre una nueva ventana de terminal (CMD o PowerShell) y ejecuta:" -ForegroundColor Green

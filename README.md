@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎬 Anime-CMD v2.3
+# 🎬 Anime-CMD v1.5.0
 
 **Herramienta interactiva de línea de comandos con motor agregador multi-proveedor y agrupación inteligente para buscar y reproducir anime con prioridad absoluta en Audio Latino directamente en tu terminal.**
 
@@ -51,6 +51,14 @@ Abre tu terminal y ejecuta:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/HugoAleOlguin/Anime-CMD/main/install.sh | bash
+```
+
+### 📦 Desde el Repositorio (Clonar y ejecutar en cualquier PC)
+```bash
+git clone https://github.com/HugoAleOlguin/Anime-CMD.git
+cd Anime-CMD
+pip install -r requirements.txt
+anime  # o: python src/main.py
 ```
 
 ---

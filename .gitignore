@@ -9,3 +9,17 @@ __pycache__/
 *.pyc
 graphify-out/
 ao_eps.json
+
+# Build artifacts
+dist/
+build/anime/
+*.spec.bak
+
+# Test outputs
+tests/*.json
+
+# Assistant and tool caches
+.agents/
+.gemini/
+skills-lock.json
+CONTEXT.md
