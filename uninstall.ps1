@@ -65,11 +65,6 @@ try {
         Write-Host "  [OK] PATH actualizado en el registro." -ForegroundColor Green
     }
 } catch {
-            $_ -and $_ -ne "$HOME\.anime" -and $_ -ne "$env:USERPROFILE\.anime"
-        }) -join ';'
-        Write-Host "  [OK] PATH actualizado en el registro." -ForegroundColor Green
-    }
-} catch {
     Write-Host "  [!] Error al actualizar PATH en el registro: $_" -ForegroundColor Red
 }
 

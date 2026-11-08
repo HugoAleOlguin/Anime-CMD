@@ -18,7 +18,7 @@ $installDir = "$HOME\.anime"
 # ------------------------------------------------------------------------------
 # 1. Limpieza de instalaciones anteriores y conflictos
 # ------------------------------------------------------------------------------
-Write-Host "[1/5] Limpiando versiones y archivos temporales anteriores..." -ForegroundColor Green
+Write-Host "[1/4] Preparando entorno limpio..." -ForegroundColor Green
 
 $oldPaths = @(
     "$HOME\ani-es",
@@ -38,12 +38,10 @@ foreach ($old in $oldPaths) {
         try {
             Remove-Item -Path $old -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "  -> Elemento previo eliminado: $old" -ForegroundColor Gray
-        } catch {
-        }
+        } catch {}
     }
 }
 
-# Crear o preparar directorio de instalacion principal
 if (!(Test-Path $installDir)) {
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 } else {
@@ -55,10 +53,10 @@ if (!(Test-Path $installDir)) {
     Remove-Item -Path "$installDir\*.tmp" -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "  [OK] Entorno limpio preparado en $installDir" -ForegroundColor Green
+Write-Host "  [OK] Directorio preparado en $installDir" -ForegroundColor Green
 
 # ------------------------------------------------------------------------------
-# 2. Funciones auxiliares de validación y localización de ejecutables
+# 2. Funciones auxiliares de validación
 # ------------------------------------------------------------------------------
 function Test-ExecutableWorks {
     param([string]$exePath, [string]$testArg = "--version")
@@ -84,46 +82,26 @@ function Resolve-RealExe {
     param([string]$exePath)
     if (!$exePath -or !(Test-Path $exePath)) { return $null }
 
-    # 1. Si es un shim de Scoop (existe un archivo .shim hermano)
     $shimFile = [System.IO.Path]::ChangeExtension($exePath, ".shim")
     if (Test-Path $shimFile) {
         try {
             $content = Get-Content $shimFile -Raw
             if ($content -match 'path\s*=\s*"([^"]+)"') {
                 $target = $matches[1]
-                if (Test-Path $target) {
-                    return $target
-                }
+                if (Test-Path $target) { return $target }
             }
         } catch {}
     }
 
-    # 2. Si es un enlace simbólico o junction
     try {
         $item = Get-Item $exePath -ErrorAction SilentlyContinue
         if ($item -and $item.LinkType -and $item.Target) {
             $target = $item.Target
-            if (Test-Path $target) {
-                return $target
-            }
+            if (Test-Path $target) { return $target }
         }
     } catch {}
 
     return $exePath
-}
-
-# Limpieza preventiva de binarios corruptos o shims huérfanos en $installDir
-if (Test-Path "$installDir\fzf.exe") {
-    if (!(Test-ExecutableWorks "$installDir\fzf.exe")) {
-        Remove-Item -Path "$installDir\fzf.exe" -Force -ErrorAction SilentlyContinue
-        Write-Host "  -> Shim/ejecutable fzf.exe inválido eliminado de $installDir" -ForegroundColor Gray
-    }
-}
-if (Test-Path "$installDir\mpv.exe") {
-    if (!(Test-ExecutableWorks "$installDir\mpv.exe")) {
-        Remove-Item -Path "$installDir\mpv.exe" -Force -ErrorAction SilentlyContinue
-        Write-Host "  -> Shim/ejecutable mpv.exe inválido eliminado de $installDir" -ForegroundColor Gray
-    }
 }
 
 function Find-MpvExe {
@@ -148,23 +126,16 @@ function Find-MpvExe {
     $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     if (Test-Path $wingetPkg) {
         $found = Get-ChildItem -Path $wingetPkg -Filter "mpv.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $searchLocations += $found.FullName
-        }
+        if ($found) { $searchLocations += $found.FullName }
     }
 
     foreach ($loc in $searchLocations) {
         if ($loc -and (Test-Path $loc)) {
             $real = Resolve-RealExe $loc
-            if (Test-ExecutableWorks $real) {
-                return $real
-            }
-            if (Test-ExecutableWorks $loc) {
-                return $loc
-            }
+            if (Test-ExecutableWorks $real) { return $real }
+            if (Test-ExecutableWorks $loc) { return $loc }
         }
     }
-
     return $null
 }
 
@@ -187,70 +158,101 @@ function Find-FzfExe {
     $wingetPkg = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     if (Test-Path $wingetPkg) {
         $found = Get-ChildItem -Path $wingetPkg -Filter "fzf.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $searchLocations += $found.FullName
-        }
+        if ($found) { $searchLocations += $found.FullName }
     }
 
     foreach ($loc in $searchLocations) {
         if ($loc -and (Test-Path $loc)) {
             $real = Resolve-RealExe $loc
-            if (Test-ExecutableWorks $real) {
-                return $real
-            }
-            if (Test-ExecutableWorks $loc) {
-                return $loc
-            }
+            if (Test-ExecutableWorks $real) { return $real }
+            if (Test-ExecutableWorks $loc) { return $loc }
         }
     }
-
     return $null
 }
 
 # ------------------------------------------------------------------------------
-# 3. Verificacion e instalacion de dependencias necesarias
+# 3. Obtener Anime-CMD (Prioridad: Binario nativo standalone sin dependencias)
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[2/5] Verificando dependencias esenciales..." -ForegroundColor Green
+Write-Host "[2/4] Configurando Anime-CMD v1.7.0..." -ForegroundColor Green
 
-# Git (Git Bash)
-$gitBash = $null
-if (Test-Path "C:\Program Files\Git\bin\bash.exe") {
-    $gitBash = "C:\Program Files\Git\bin\bash.exe"
-} elseif (Test-Path "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe") {
-    $gitBash = "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
-} elseif (Get-Command git.exe -ErrorAction SilentlyContinue) {
-    $gitCmd = (Get-Command git.exe).Source
-    $possibleBash = Join-Path (Split-Path (Split-Path $gitCmd -Parent) -Parent) "bin\bash.exe"
-    if (Test-Path $possibleBash) { $gitBash = $possibleBash }
+$isStandalone = $false
+$hasLocalSource = $false
+$localRoot = $null
+
+if (![string]::IsNullOrEmpty($PSScriptRoot) -and (Test-Path "$PSScriptRoot\src\main.py")) {
+    $localRoot = $PSScriptRoot
+    $hasLocalSource = $true
+} elseif (Test-Path ".\src\main.py") {
+    $localRoot = (Get-Location).Path
+    $hasLocalSource = $true
 }
 
-if (!$gitBash -and !(Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    Write-Host "  [!] Git: NO encontrado, instalando..." -ForegroundColor Yellow
-    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent
+# Caso 1: Instalación local
+if ($hasLocalSource) {
+    Copy-Item -Path "$localRoot\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path "$localRoot\dist\anime.exe") {
+        Copy-Item -Path "$localRoot\dist\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+        $isStandalone = $true
+        Write-Host "  [OK] Binario nativo anime.exe instalado desde compilacion local." -ForegroundColor Green
+    } elseif (Test-Path "$localRoot\anime.exe") {
+        Copy-Item -Path "$localRoot\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+        $isStandalone = $true
+        Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
+    } else {
+        Write-Host "  [OK] Codigo fuente local src/ copiado a $installDir" -ForegroundColor Green
     }
 } else {
-    Write-Host "  [OK] Git Bash: Presente" -ForegroundColor Green
+    # Caso 2: Instalación remota via web (irm ... | iex)
+    Write-Host "  [*] Descargando ejecutable standalone (no requiere Python ni Git)..." -ForegroundColor Cyan
+    $releaseExeUrl = "https://github.com/HugoAleOlguin/Anime-CMD/releases/latest/download/anime.exe"
+    try {
+        Invoke-WebRequest -Uri $releaseExeUrl -OutFile "$installDir\anime.exe" -UseBasicParsing -TimeoutSec 45
+        if ((Test-Path "$installDir\anime.exe") -and (Get-Item "$installDir\anime.exe").Length -gt 5000000) {
+            $isStandalone = $true
+            Write-Host "  [OK] Binario standalone anime.exe descargado con exito." -ForegroundColor Green
+        } else {
+            Remove-Item -Path "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Remove-Item -Path "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
+    }
+
+    # Si no se pudo bajar el binario (fallback a código fuente)
+    if (!$isStandalone) {
+        Write-Host "  [!] Descargando codigo fuente como fallback..." -ForegroundColor Yellow
+        $zipPath = "$env:TEMP\anime_repo.zip"
+        $extractDir = "$env:TEMP\anime_extracted"
+        try {
+            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://github.com/HugoAleOlguin/Anime-CMD/archive/refs/heads/main.zip" -OutFile $zipPath -UseBasicParsing
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            $extractedSrc = Get-ChildItem -Path $extractDir -Recurse -Filter "src" -Directory | Select-Object -First 1
+            if ($extractedSrc -and (Test-Path $extractedSrc.FullName)) {
+                Copy-Item -Path $extractedSrc.FullName -Destination $installDir -Recurse -Force
+                Write-Host "  [OK] Codigo fuente descargado e instalado en $installDir" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "  [!] Error descargando codigo fuente: $_" -ForegroundColor Red
+        } finally {
+            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
-# Python
-$hasPython = (Get-Command python.exe -ErrorAction SilentlyContinue) -or `
-             (Get-Command python3.exe -ErrorAction SilentlyContinue) -or `
-             (Get-Command py.exe -ErrorAction SilentlyContinue)
-if (!$hasPython) {
-    Write-Host "  [!] Python: NO encontrado, instalando..." -ForegroundColor Yellow
-    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent
-    }
-} else {
-    Write-Host "  [OK] Python: Presente" -ForegroundColor Green
-}
+# ------------------------------------------------------------------------------
+# 4. Verificacion de componentes (FZF y MPV Player)
+# ------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "[3/4] Verificando componentes multimedia (FZF y MPV)..." -ForegroundColor Green
 
 # FZF
 $fzfPath = Find-FzfExe
 if (!$fzfPath) {
-    Write-Host "  [*] Instalando FZF de forma autonoma..." -ForegroundColor Green
+    Write-Host "  [*] Descargando FZF..." -ForegroundColor Green
     try {
         $fzfZip = "$env:TEMP\fzf_download.zip"
         Invoke-WebRequest -Uri "https://github.com/junegunn/fzf/releases/download/v0.60.3/fzf-0.60.3-windows_amd64.zip" -OutFile $fzfZip -UseBasicParsing
@@ -278,18 +280,16 @@ if ($fzfPath) {
         } catch {}
     }
 } else {
-    Write-Host "  [!] FZF: No se pudo configurar automaticamente." -ForegroundColor Yellow
+    Write-Host "  [!] FZF: Opcional, navegacion estandar activada." -ForegroundColor Yellow
 }
 
-# MPV
+# MPV Player
 $mpvPath = Find-MpvExe
 if (!$mpvPath) {
-    Write-Host "  [*] Instalando MPV Player de forma autonoma..." -ForegroundColor Green
-    
-    # 1. Descarga directa standalone de MPV
+    Write-Host "  [*] Configurando reproductor MPV optimizado..." -ForegroundColor Green
     try {
         $mpv7z = "$env:TEMP\mpv_download.7z"
-        Write-Host "    -> Descargando paquete optimizado de MPV..." -ForegroundColor Green
+        Write-Host "    -> Descargando reproductor portatil..." -ForegroundColor Green
         Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260814/mpv-x86_64-20260814-git-7b8915bc1d.7z" -OutFile $mpv7z -UseBasicParsing
         & tar -xf $mpv7z -C $installDir
         Remove-Item -Path $mpv7z -Force -ErrorAction SilentlyContinue
@@ -297,26 +297,15 @@ if (!$mpvPath) {
             $mpvPath = "$installDir\mpv.exe"
         }
     } catch {
-        # Fallback a WinGet o Scoop si la descarga directa fallara
         if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-            Write-Host "    -> Intentando WinGet..." -ForegroundColor Green
             & winget install --id shinchiro.mpv -e --source winget --accept-package-agreements --accept-source-agreements --silent
-            $mpvPath = Find-MpvExe
-        }
-        if (!$mpvPath) {
-            Write-Host "    -> Intentando Scoop..." -ForegroundColor Green
-            if (!(Get-Command scoop.exe -ErrorAction SilentlyContinue)) {
-                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-                Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-            }
-            & scoop install mpv
             $mpvPath = Find-MpvExe
         }
     }
 }
 
 if ($mpvPath) {
-    Write-Host "  [OK] MPV: Presente ($mpvPath)" -ForegroundColor Green
+    Write-Host "  [OK] MPV Player: Presente ($mpvPath)" -ForegroundColor Green
     if ($mpvPath -ne "$installDir\mpv.exe" -and (Test-Path $mpvPath)) {
         try {
             $realMpv = Resolve-RealExe $mpvPath
@@ -331,105 +320,30 @@ if ($mpvPath) {
         } catch {}
     }
 } else {
-    Write-Host "  [!] MPV: No se pudo configurar automaticamente." -ForegroundColor Yellow
+    Write-Host "  [!] MPV: Se recomienda instalar MPV para la reproduccion." -ForegroundColor Yellow
+}
+
+# Solo si NO se tiene el binario standalone, se configuran las dependencias de Python
+if (!$isStandalone -and (Test-Path "$installDir\src\main.py")) {
+    Write-Host ""
+    Write-Host "  [*] Modo codigo fuente: verificando entorno Python..." -ForegroundColor Cyan
+    $hasPython = (Get-Command python.exe -ErrorAction SilentlyContinue) -or `
+                 (Get-Command python3.exe -ErrorAction SilentlyContinue) -or `
+                 (Get-Command py.exe -ErrorAction SilentlyContinue)
+    if (!$hasPython -and (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements --silent
+    }
+    if (Get-Command pip -ErrorAction SilentlyContinue) {
+        & pip install --quiet beautifulsoup4 curl_cffi 2>&1 | Out-Null
+    }
 }
 
 # ------------------------------------------------------------------------------
-# 4. Instalacion de BeautifulSoup4 y curl_cffi en Python
+# 5. Generar lanzador anime.cmd y configurar variable de entorno PATH
 # ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "[3/5] Configurando librerias de Python..." -ForegroundColor Green
+Write-Host "[4/4] Configurando variables de entorno con maxima prioridad..." -ForegroundColor Green
 
-if (Get-Command pip -ErrorAction SilentlyContinue) {
-    & pip install --quiet beautifulsoup4 curl_cffi 2>&1 | Out-Null
-    Write-Host "  [OK] BeautifulSoup4 y curl_cffi configurados correctamente." -ForegroundColor Green
-} elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    & py -m pip install --quiet beautifulsoup4 curl_cffi 2>&1 | Out-Null
-    Write-Host "  [OK] BeautifulSoup4 y curl_cffi configurados correctamente." -ForegroundColor Green
-}
-
-# ------------------------------------------------------------------------------
-# 5. Instalar codigo fuente y lanzador de Anime-CMD v1.7.0
-# ------------------------------------------------------------------------------
-Write-Host ""
-Write-Host "[4/5] Configurando Anime-CMD v1.7.0..." -ForegroundColor Green
-
-# Caso A: Instalación local desde repositorio clonado
-$hasLocalSource = $false
-$localRoot = $null
-
-if (![string]::IsNullOrEmpty($PSScriptRoot) -and (Test-Path "$PSScriptRoot\src\main.py")) {
-    $localRoot = $PSScriptRoot
-    $hasLocalSource = $true
-} elseif (Test-Path ".\src\main.py") {
-    $localRoot = (Get-Location).Path
-    $hasLocalSource = $true
-}
-
-if ($hasLocalSource) {
-    Copy-Item -Path "$localRoot\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "  [OK] Codigo fuente src/ copiado a $installDir" -ForegroundColor Green
-    if (Test-Path "$localRoot\dist\anime.exe") {
-        Copy-Item -Path "$localRoot\dist\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
-    } elseif (Test-Path "$localRoot\anime.exe") {
-        Copy-Item -Path "$localRoot\anime.exe" -Destination "$installDir\anime.exe" -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Binario nativo anime.exe instalado." -ForegroundColor Green
-    }
-} else {
-    # Caso B: Instalación remota via web (irm ... | iex)
-    $installed = $false
-    $cloneDir = "$installDir\repo"
-
-    # 1. Intentar clonar o actualizar via git si está disponible
-    $gitExe = $null
-    if (Get-Command git.exe -ErrorAction SilentlyContinue) {
-        $gitExe = "git.exe"
-    } elseif (Test-Path "C:\Program Files\Git\cmd\git.exe") {
-        $gitExe = "C:\Program Files\Git\cmd\git.exe"
-    }
-
-    if ($gitExe) {
-        try {
-            if (Test-Path "$cloneDir\.git") {
-                & $gitExe -C $cloneDir pull --quiet 2>$null
-            } else {
-                Remove-Item -Path $cloneDir -Recurse -Force -ErrorAction SilentlyContinue
-                & $gitExe clone --depth 1 --quiet "https://github.com/HugoAleOlguin/Anime-CMD.git" $cloneDir 2>$null
-            }
-            if (Test-Path "$cloneDir\src") {
-                Copy-Item -Path "$cloneDir\src" -Destination $installDir -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "  [OK] Codigo fuente clonado e instalado en $installDir" -ForegroundColor Green
-                $installed = $true
-            }
-        } catch {}
-    }
-
-    # 2. Si no se pudo por git, descargar ZIP del repositorio desde GitHub
-    if (!$installed) {
-        $zipPath = "$env:TEMP\anime_repo.zip"
-        $extractDir = "$env:TEMP\anime_extracted"
-        try {
-            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-            Invoke-WebRequest -Uri "https://github.com/HugoAleOlguin/Anime-CMD/archive/refs/heads/main.zip" -OutFile $zipPath -UseBasicParsing
-            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-            $extractedSrc = Get-ChildItem -Path $extractDir -Recurse -Filter "src" -Directory | Select-Object -First 1
-            if ($extractedSrc -and (Test-Path $extractedSrc.FullName)) {
-                Copy-Item -Path $extractedSrc.FullName -Destination $installDir -Recurse -Force
-                Write-Host "  [OK] Codigo fuente descargado e instalado en $installDir" -ForegroundColor Green
-                $installed = $true
-            }
-        } catch {
-            Write-Host "  [!] Error descargando archivo ZIP del repositorio: $_" -ForegroundColor Red
-        } finally {
-            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-# Crear el comando ejecutable universal anime.cmd
 $cmdLines = @(
     "@echo off",
     "setlocal",
@@ -453,20 +367,12 @@ $cmdLines = @(
 [System.IO.File]::WriteAllLines("$installDir\anime.cmd", $cmdLines)
 Write-Host "  [OK] Lanzador universal anime.cmd generado." -ForegroundColor Green
 
-# ------------------------------------------------------------------------------
-# 6. Configurar variable de entorno PATH con maxima prioridad
-# ------------------------------------------------------------------------------
-Write-Host ""
-Write-Host "[5/5] Configurando variables de entorno con maxima prioridad..." -ForegroundColor Green
-
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($null -eq $userPath) { $userPath = "" }
 
-# Extraer y filtrar entradas existentes para evitar duplicados y asegurar prioridad maxima a $installDir
 $existingParts = ($userPath -split ';') | Where-Object { $_ -ne "" -and $_.Trim() -ne $installDir }
-
-# Construir lista priorizada: $installDir siempre al principio
 $finalPaths = @($installDir)
+
 $wingetLinks = "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
 if (Test-Path $wingetLinks) {
     $existingParts = $existingParts | Where-Object { $_.Trim() -ne $wingetLinks }
@@ -484,10 +390,10 @@ if (Test-Path $scoopAppsFzf) {
 }
 
 $finalPaths += $existingParts
-$newUserPath = ($finalPaths -join ';')
+$newCombinedPath = ($finalPaths | Where-Object { $_ -ne "" }) -join ';'
 
-[Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-$env:Path = "$installDir;" + $env:Path
+[Environment]::SetEnvironmentVariable("Path", $newCombinedPath, "User")
+$env:Path = "$installDir;$env:Path"
 
 Write-Host "  [OK] $installDir configurado con maxima prioridad en PATH." -ForegroundColor Green
 
