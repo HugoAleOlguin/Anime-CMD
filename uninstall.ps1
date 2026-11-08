@@ -50,12 +50,21 @@ Write-Host "[3/3] Limpiando la variable PATH del usuario..." -ForegroundColor Ye
 try {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath) {
+        $targetA = "$HOME\.anime".Trim().TrimEnd('\').ToLower()
+        $targetB = "$env:USERPROFILE\.anime".Trim().TrimEnd('\').ToLower()
         $cleanDirs = $userPath -split ';' | Where-Object {
-            $_ -and $_ -ne "$HOME\.anime" -and $_ -ne "$env:USERPROFILE\.anime"
+            $norm = $_.Trim().TrimEnd('\').ToLower()
+            $norm -ne "" -and $norm -ne $targetA -and $norm -ne $targetB
         }
         $newPath = $cleanDirs -join ';'
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
         $env:Path = ($env:Path -split ';' | Where-Object {
+            $norm = $_.Trim().TrimEnd('\').ToLower()
+            $norm -ne "" -and $norm -ne $targetA -and $norm -ne $targetB
+        }) -join ';'
+        Write-Host "  [OK] PATH actualizado en el registro." -ForegroundColor Green
+    }
+} catch {
             $_ -and $_ -ne "$HOME\.anime" -and $_ -ne "$env:USERPROFILE\.anime"
         }) -join ';'
         Write-Host "  [OK] PATH actualizado en el registro." -ForegroundColor Green
